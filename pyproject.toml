@@ -1,0 +1,20 @@
+[project]
+name = "vtk"
+version = "0.1.0"
+description = "VLESS Toolkit — parse, convert proxy links & subscriptions"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx",
+]
+
+[project.optional-dependencies]
+bot = ["aiogram>=3"]
+web = ["fastapi", "uvicorn"]
+cli = ["typer"]
+dev = ["ruff", "pytest"]
+
+[project.scripts]
+vtk = "cli.main:app"
+
+[tool.setuptools.packages.find]
+include = ["core*", "cli*", "bot*", "web*"]
