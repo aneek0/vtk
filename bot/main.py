@@ -280,7 +280,9 @@ async def _process_input(message, text: str):
         nodes = parse_text_input(text)
         nodes = [n for n in nodes if n.protocol != "error"]
         if not nodes:
-            await message.reply("❌ No valid proxy links found")
+            logger.warning(f"No valid nodes parsed. Input: {text[:100]}")
+            await message.reply(f"❌ No valid proxy links found in: <pre>{text[:200]}</pre>",
+                                parse_mode=ParseMode.HTML)
             return
         # Check if it looks like a txt file (multiple share links)
         lines = [l.strip() for l in text.strip().splitlines() if l.strip() and not l.startswith("#")]
@@ -291,6 +293,7 @@ async def _process_input(message, text: str):
         else:
             fmt = s.link_format
         input_msg = f"✅ {len(nodes)} nodes"
+        logger.info(f"Parsed {len(nodes)} nodes, format={fmt.value}")
 
     # Convert
     try:
@@ -300,6 +303,7 @@ async def _process_input(message, text: str):
         return
 
     ext = _fmt_ext(fmt)
+    logger.info(f"Result: {len(result)} chars, ext={ext}")
     if len(result) > 3000:
         await _reply_as_file(message, result, f"config.{ext}")
     else:
