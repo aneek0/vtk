@@ -5,6 +5,7 @@ description = "VLESS Toolkit — parse, convert proxy links & subscriptions"
 requires-python = ">=3.10"
 dependencies = [
     "httpx",
+    "orjson",
 ]
 
 [project.optional-dependencies]

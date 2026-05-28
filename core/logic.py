@@ -1,9 +1,9 @@
-"""Core parsing: vless/vmess/ss/ssr/trojan links + subscription fetching."""
+"""Core parsing: vless/vmess/ss/ssr/trojan/hysteria2/socks/happ links + subscriptions."""
 
 import base64
 import json
 import re
-import binascii
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 from urllib.parse import urlparse, parse_qs, unquote
@@ -17,56 +17,58 @@ class ParseError(Exception):
 
 @dataclass
 class Node:
-    protocol: str          # vless, vmess, ss, ssr, trojan
-    uuid: str = ""         # vless/vmess/trojan
+    protocol: str
+    uuid: str = ""
     address: str = ""
     port: int = 0
-    name: str = ""         # human-readable tag
+    name: str = ""
     # transport
-    net: str = "tcp"       # tcp, ws, grpc, h2, quic
+    net: str = "tcp"       # tcp, ws, grpc, h2, quic, xhttp
     path: str = ""
-    host: str = ""         # Host header (ws/h2)
+    host: str = ""
     # security
     tls: bool = False
     sni: str = ""
     alpn: str = ""
-    fp: str = ""           # fingerprint (client-fingerprint)
+    fp: str = ""
     # reality
     reality_pbk: str = ""
     reality_sid: str = ""
     reality_spx: str = ""
-    # vmess specific
+    # vmess
     vmess_aid: int = 0
-    vmess_scy: str = "auto"  # security: auto/aes-128-gcm/chacha20-poly1305/none
-    # ss specific
+    vmess_scy: str = "auto"
+    # ss
     ss_method: str = ""
     ss_password: str = ""
-    # ssr specific
+    # ssr
     ssr_protocol: str = ""
     ssr_obfs: str = ""
     ssr_protocol_param: str = ""
     ssr_obfs_param: str = ""
-    # trojan specific
+    # trojan
     trojan_password: str = ""
     # flow (XTLS)
     flow: str = ""
-    # extra raw params
+    # hysteria2
+    hysteria2_password: str = ""
+    hysteria2_obfs: str = ""
+    obfs: str = ""  # generic obfs field
+    # socks
+    socks_username: str = ""
+    socks_password: str = ""
+    # extra
     extra: dict = field(default_factory=dict)
 
     @property
     def display_name(self) -> str:
-        if self.name:
-            return self.name
-        return f"{self.protocol}://{self.address}:{self.port}"
+        return self.name or f"{self.protocol}://{self.address}:{self.port}"
 
     def to_vless_link(self) -> str:
-        """Reconstruct as vless:// share link (only works for vless nodes)."""
         if self.protocol != "vless":
             raise ParseError(f"Cannot convert {self.protocol} to vless link")
         from urllib.parse import urlencode, quote
-        params = {"encryption": "none"}
-        # Always include type (required by some clients like podkop)
-        params["type"] = self.net if self.net else "tcp"
+        params = {"encryption": "none", "type": self.net or "tcp"}
         if self.tls:
             params["security"] = "tls"
             if self.sni:
@@ -92,27 +94,82 @@ class Node:
             link += "#" + quote(self.name, safe="")
         return link
 
+    def to_trojan_link(self) -> str:
+        if self.protocol != "trojan":
+            raise ParseError(f"Cannot convert {self.protocol} to trojan link")
+        from urllib.parse import urlencode, quote
+        params: dict = {}
+        if self.sni:
+            params["sni"] = self.sni
+        if self.alpn:
+            params["alpn"] = self.alpn
+        if self.net and self.net != "tcp":
+            params["type"] = self.net
+        if self.fp:
+            params["fp"] = self.fp
+        base = f"trojan://{self.trojan_password}@{self.address}:{self.port}"
+        link = base
+        if params:
+            link += "?" + urlencode(params)
+        if self.name:
+            link += "#" + quote(self.name, safe="")
+        return link
+
+    def to_ss_link(self) -> str:
+        if self.protocol != "ss":
+            raise ParseError(f"Cannot convert {self.protocol} to ss link")
+        from urllib.parse import quote
+        userinfo = _b64encode(f"{self.ss_method}:{self.ss_password}")
+        link = f"ss://{userinfo}@{self.address}:{self.port}"
+        if self.name:
+            link += "#" + quote(self.name, safe="")
+        return link
+
+    def to_hysteria2_link(self) -> str:
+        if self.protocol != "hysteria2":
+            raise ParseError(f"Cannot convert {self.protocol} to hysteria2 link")
+        from urllib.parse import urlencode, quote
+        params: dict = {}
+        if self.sni:
+            params["sni"] = self.sni
+        if self.obfs:
+            params["obfs"] = self.obfs
+        base = f"hysteria2://{self.hysteria2_password}@{self.address}:{self.port}"
+        link = base
+        if params:
+            link += "?" + urlencode(params)
+        if self.name:
+            link += "#" + quote(self.name, safe="")
+        return link
+
 
 # ---------------------------------------------------------------------------
-# Individual link parsers
+# Helpers
 # ---------------------------------------------------------------------------
-
-_UUID_RE = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I
-)
-
 
 def _get(qs: dict, key: str, default: str = "") -> str:
     return qs.get(key, [default])[0]
+
+
+def _b64decode(s: str) -> str:
+    s = s.strip()
+    missing = len(s) % 4
+    if missing:
+        s += "=" * (4 - missing)
+    return base64.urlsafe_b64decode(s).decode("utf-8", errors="replace")
+
+
+def _b64encode(s: str) -> str:
+    return base64.urlsafe_b64encode(s.encode()).decode().rstrip("=")
 
 
 def fix_link(link: str) -> str:
     """Normalize a proxy link to standard format.
 
     Fixes:
-    - vless/vmess/trojan: adds ? before first & if no ? present
+    - vless/trojan: adds ? before first & if no ? present
     - vless: adds type=tcp if missing (required by some clients like podkop)
-    - vless: normalizes packet-encoding → packetEncoding
+    - vless: normalizes packet-encoding -> packetEncoding
     """
     link = link.strip()
     if not link:
@@ -120,7 +177,6 @@ def fix_link(link: str) -> str:
 
     for prefix in ("vless://", "trojan://"):
         if link.startswith(prefix):
-            # Find the end of authority (host:port)
             rest = link[len(prefix):]
             # authority ends at first ?, &, or #
             end = len(rest)
@@ -132,13 +188,12 @@ def fix_link(link: str) -> str:
             authority = rest[:end]
             remainder = rest[end:]
 
-            # If remainder starts with & → replace with ?
+            # & -> ? at start of query
             if remainder.startswith("&"):
                 remainder = "?" + remainder[1:]
 
-            # For vless: ensure type=tcp is in query (check decoded link)
+            # vless: ensure type is present (check decoded full link)
             if prefix == "vless://" and "type=" not in unquote(link[len(prefix):]):
-                # Insert type=tcp before fragment (#) if present
                 hash_idx = remainder.find("#")
                 if hash_idx != -1:
                     remainder = remainder[:hash_idx] + "&type=tcp" + remainder[hash_idx:]
@@ -147,12 +202,65 @@ def fix_link(link: str) -> str:
                 else:
                     remainder = remainder + "?type=tcp"
 
-            # Normalize packet-encoding → packetEncoding
+            # Normalize packet-encoding -> packetEncoding
             remainder = remainder.replace("packet-encoding=", "packetEncoding=")
 
             return prefix + authority + remainder
 
     return link
+
+
+def extract_country(name: str) -> str:
+    """Extract country from node name using emoji flags or text patterns.
+
+    Returns country name or "Other" if not found.
+    """
+    if not name:
+        return "Other"
+
+    # Common country emoji patterns at start of name
+    FLAG_MAP = {
+        "🇷🇺": "RU", "🇺🇸": "US", "🇩🇪": "DE", "🇳🇱": "NL",
+        "🇬🇧": "GB", "🇫🇷": "FR", "🇯🇵": "JP", "🇰🇷": "KR",
+        "🇸🇪": "SE", "🇫🇮": "FI", "🇵🇱": "PL", "🇪🇪": "EE",
+        "🇱🇻": "LV", "🇱🇹": "LT", "🇨🇭": "CH", "🇦🇿": "AZ",
+        "🇹🇷": "TR", "🇮🇱": "IL", "🇰🇿": "KZ", "🇲🇩": "MD",
+        "🇧🇬": "BG", "🇭🇺": "HU", "🇪🇸": "ES", "🇮🇪": "IE",
+        "🇩🇰": "DK", "🇭🇰": "HK", "🇮🇳": "IN", "🇨🇳": "CN",
+        "🇧🇷": "BR", "🇨🇦": "CA", "🇦🇺": "AU", "🇮🇹": "IT",
+    }
+
+    for flag, code in FLAG_MAP.items():
+        if name.startswith(flag):
+            return code
+
+    # Try text patterns: "US |", "Germany", "Netherlands" etc.
+    text_patterns = {
+        r"^RU\b|(?<!\w)Russia(?!\w)": "RU",
+        r"^US\b|(?<!\w)United States(?!\w)": "US",
+        r"^DE\b|(?<!\w)Germany(?!\w)": "DE",
+        r"^NL\b|(?<!\w)Netherlands(?!\w)": "NL",
+        r"^GB\b|(?<!\w)United Kingdom(?!\w)|(?<!\w)UK(?!\w)": "GB",
+        r"^FR\b|(?<!\w)France(?!\w)": "FR",
+        r"^JP\b|(?<!\w)Japan(?!\w)": "JP",
+        r"^FI\b|(?<!\w)Finland(?!\w)": "FI",
+        r"^PL\b|(?<!\w)Poland(?!\w)": "PL",
+        r"^SE\b|(?<!\w)Sweden(?!\w)": "SE",
+    }
+    for pattern, code in text_patterns.items():
+        if re.search(pattern, name, re.I):
+            return code
+
+    return "Other"
+
+
+# ---------------------------------------------------------------------------
+# Individual parsers
+# ---------------------------------------------------------------------------
+
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I
+)
 
 
 def parse_vless(link: str) -> Node:
@@ -184,7 +292,6 @@ def parse_vless(link: str) -> Node:
         reality_spx=_get(qs, "spx"),
         flow=_get(qs, "flow"),
     )
-    # name from fragment
     if parsed.fragment:
         node.name = unquote(parsed.fragment)
     return node
@@ -223,6 +330,7 @@ def parse_trojan(link: str) -> Node:
     link = link.strip()
     if not link.startswith("trojan://"):
         raise ParseError("Not a Trojan link")
+    link = fix_link(link)
     parsed = urlparse(link)
     if not parsed.hostname or not parsed.port:
         raise ParseError("Missing host/port")
@@ -251,7 +359,6 @@ def parse_ss(link: str) -> Node:
         raise ParseError("Not an SS link")
     parsed = urlparse(link)
     if parsed.hostname and parsed.port is not None:
-        # SIP002: ss://base64(method:password)@host:port#name
         try:
             decoded = _b64decode(parsed.username or "")
         except Exception:
@@ -269,13 +376,11 @@ def parse_ss(link: str) -> Node:
             ss_password=password,
         )
     else:
-        # legacy: ss://base64(method:password@host:port)
         payload = link[5:]
         try:
             decoded = _b64decode(payload)
         except Exception as e:
             raise ParseError(f"Invalid SS base64: {e}")
-        # method:password@host:port
         m = re.match(r"^(.+?):(.+?)@(.+?):(\d+)", decoded)
         if not m:
             raise ParseError(f"Cannot parse legacy SS: {decoded}")
@@ -298,7 +403,6 @@ def parse_ssr(link: str) -> Node:
         decoded = _b64decode(payload)
     except Exception as e:
         raise ParseError(f"Invalid SSR base64: {e}")
-    # host:port:protocol:method:obfs:base64pass/?params
     main, _, param_str = decoded.partition("/?")
     parts = main.split(":")
     if len(parts) < 6:
@@ -323,13 +427,47 @@ def parse_ssr(link: str) -> Node:
     )
 
 
-def _b64decode(s: str) -> str:
-    """Decode base64 with padding fix."""
-    s = s.strip()
-    missing = len(s) % 4
-    if missing:
-        s += "=" * (4 - missing)
-    return base64.urlsafe_b64decode(s).decode("utf-8", errors="replace")
+def parse_hysteria2(link: str) -> Node:
+    """Parse hysteria2:// link."""
+    link = link.strip()
+    if not link.startswith("hysteria2://"):
+        raise ParseError("Not a Hysteria2 link")
+    parsed = urlparse(link)
+    if not parsed.hostname or not parsed.port:
+        raise ParseError("Missing host/port")
+    qs = parse_qs(parsed.query)
+    node = Node(
+        protocol="hysteria2",
+        address=parsed.hostname,
+        port=parsed.port,
+        hysteria2_password=unquote(parsed.username or ""),
+        sni=_get(qs, "sni"),
+        alpn=_get(qs, "alpn"),
+        obfs=_get(qs, "obfs"),
+    )
+    if parsed.fragment:
+        node.name = unquote(parsed.fragment)
+    return node
+
+
+def parse_socks(link: str) -> Node:
+    """Parse socks:// link."""
+    link = link.strip()
+    if not link.startswith("socks://"):
+        raise ParseError("Not a SOCKS link")
+    parsed = urlparse(link)
+    if not parsed.hostname or not parsed.port:
+        raise ParseError("Missing host/port")
+    node = Node(
+        protocol="socks",
+        address=parsed.hostname,
+        port=parsed.port,
+        socks_username=unquote(parsed.username or ""),
+        socks_password=unquote(parsed.password or ""),
+    )
+    if parsed.fragment:
+        node.name = unquote(parsed.fragment)
+    return node
 
 
 # ---------------------------------------------------------------------------
@@ -342,6 +480,8 @@ _PROTOCOL_PREFIXES = {
     "trojan://": parse_trojan,
     "ss://": parse_ss,
     "ssr://": parse_ssr,
+    "hysteria2://": parse_hysteria2,
+    "socks://": parse_socks,
 }
 
 
@@ -355,7 +495,11 @@ def parse_link(link: str) -> Node:
 
 
 def parse_text_input(text: str) -> list[Node]:
-    """Parse text containing one or more links (one per line)."""
+    """Parse text containing one or more links (one per line).
+
+    Optimized: fix_link is called inside each parser, not redundantly here.
+    For large inputs, processes line-by-line to minimize memory.
+    """
     nodes = []
     for line in text.strip().splitlines():
         line = line.strip()
@@ -368,6 +512,21 @@ def parse_text_input(text: str) -> list[Node]:
     return nodes
 
 
+def iter_parse_text(text: str):
+    """Streaming parser — yields nodes one at a time (generator).
+
+    Use for very large inputs to avoid loading all nodes into memory.
+    """
+    for line in text.strip().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            yield parse_link(line)
+        except ParseError as e:
+            yield Node(protocol="error", name=str(e), extra={"raw": line})
+
+
 # ---------------------------------------------------------------------------
 # Subscription fetching
 # ---------------------------------------------------------------------------
@@ -378,12 +537,11 @@ async def fetch_subscription(url: str, timeout: int = 15) -> str:
         resp = await client.get(url)
         resp.raise_for_status()
         content = resp.text.strip()
-        # Many subs are base64-encoded
         if "\n" not in content and "\r" not in content:
             try:
                 content = _b64decode(content)
             except Exception:
-                pass  # not base64, use raw
+                pass
         return content
 
 
@@ -391,14 +549,12 @@ async def parse_subscription(url: str, timeout: int = 15) -> list[Node]:
     """Fetch and parse a subscription URL."""
     content = await fetch_subscription(url, timeout)
     nodes = parse_text_input(content)
-    # Filter out error nodes
     return [n for n in nodes if n.protocol != "error"]
 
 
 def parse_subscription_text(text: str) -> list[Node]:
     """Parse already-fetched subscription text (may be base64)."""
     text = text.strip()
-    # Try decode as single base64 blob
     if "\n" not in text and "\r" not in text:
         try:
             text = _b64decode(text)

@@ -1,8 +1,11 @@
 """Telegram bot — inline keyboard settings, file upload support."""
 
+import asyncio
 import logging
 import os
 import tempfile
+import time
+from collections import defaultdict
 
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import (
@@ -23,6 +26,24 @@ logger = logging.getLogger(__name__)
 
 TOKEN = os.environ.get("VTK_BOT_TOKEN", "")
 router = Router()
+
+# Rate-limit: 3 msg/sec per user
+_RATE_LIMIT = 3
+_RATE_WINDOW = 1.0  # seconds
+_user_timestamps: dict[int, list[float]] = defaultdict(list)
+
+
+def _check_rate_limit(user_id: int) -> bool:
+    """Return True if user is within rate limit."""
+    now = time.monotonic()
+    timestamps = _user_timestamps[user_id]
+    # Remove old entries
+    while timestamps and now - timestamps[0] > _RATE_WINDOW:
+        timestamps.pop(0)
+    if len(timestamps) >= _RATE_LIMIT:
+        return False
+    timestamps.append(now)
+    return True
 
 # Callback prefixes
 CB_SUB_FMT = "sub"
@@ -297,7 +318,7 @@ async def _process_input(message, text: str):
 
     # Convert
     try:
-        result = convert(nodes, fmt)
+        result = convert(nodes, fmt, group_by_country=s.group_by_country)
     except ParseError as e:
         await message.reply(f"❌ {e}")
         return
@@ -327,6 +348,9 @@ async def handle_document(message: Message):
 
 @router.message(F.text)
 async def handle_text(message: Message):
+    if not _check_rate_limit(message.from_user.id):
+        await message.reply("⏳ Too many messages. Wait a second.")
+        return
     await _process_input(message, message.text)
 
 
