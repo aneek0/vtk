@@ -136,8 +136,8 @@ def fix_link(link: str) -> str:
             if remainder.startswith("&"):
                 remainder = "?" + remainder[1:]
 
-            # For vless: ensure type=tcp is in query
-            if prefix == "vless://" and "type=" not in remainder:
+            # For vless: ensure type=tcp is in query (check decoded link)
+            if prefix == "vless://" and "type=" not in unquote(link[len(prefix):]):
                 if remainder.startswith("?"):
                     remainder = remainder + "&type=tcp"
                 else:
