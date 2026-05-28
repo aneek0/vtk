@@ -106,10 +106,56 @@ def _get(qs: dict, key: str, default: str = "") -> str:
     return qs.get(key, [default])[0]
 
 
+def fix_link(link: str) -> str:
+    """Normalize a proxy link to standard format.
+
+    Fixes:
+    - vless/vmess/trojan: adds ? before first & if no ? present
+    - vless: adds type=tcp if missing (required by some clients like podkop)
+    - vless: normalizes packet-encoding → packetEncoding
+    """
+    link = link.strip()
+    if not link:
+        return link
+
+    for prefix in ("vless://", "trojan://"):
+        if link.startswith(prefix):
+            # Find the end of authority (host:port)
+            rest = link[len(prefix):]
+            # authority ends at first ?, &, or #
+            end = len(rest)
+            for c in ("?", "&", "#"):
+                idx = rest.find(c)
+                if idx != -1 and idx < end:
+                    end = idx
+
+            authority = rest[:end]
+            remainder = rest[end:]
+
+            # If remainder starts with & → replace with ?
+            if remainder.startswith("&"):
+                remainder = "?" + remainder[1:]
+
+            # For vless: ensure type=tcp is in query
+            if prefix == "vless://" and "type=" not in remainder:
+                if remainder.startswith("?"):
+                    remainder = remainder + "&type=tcp"
+                else:
+                    remainder = remainder + "?type=tcp"
+
+            # Normalize packet-encoding → packetEncoding
+            remainder = remainder.replace("packet-encoding=", "packetEncoding=")
+
+            return prefix + authority + remainder
+
+    return link
+
+
 def parse_vless(link: str) -> Node:
     link = link.strip()
     if not link.startswith("vless://"):
         raise ParseError("Not a vLESS link")
+    link = fix_link(link)
     parsed = urlparse(link)
     if not parsed.hostname or not parsed.port:
         raise ParseError("Missing host/port")
