@@ -138,7 +138,11 @@ def fix_link(link: str) -> str:
 
             # For vless: ensure type=tcp is in query (check decoded link)
             if prefix == "vless://" and "type=" not in unquote(link[len(prefix):]):
-                if remainder.startswith("?"):
+                # Insert type=tcp before fragment (#) if present
+                hash_idx = remainder.find("#")
+                if hash_idx != -1:
+                    remainder = remainder[:hash_idx] + "&type=tcp" + remainder[hash_idx:]
+                elif remainder.startswith("?"):
                     remainder = remainder + "&type=tcp"
                 else:
                     remainder = remainder + "?type=tcp"
