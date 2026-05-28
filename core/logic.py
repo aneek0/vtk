@@ -65,8 +65,8 @@ class Node:
             raise ParseError(f"Cannot convert {self.protocol} to vless link")
         from urllib.parse import urlencode, quote
         params = {"encryption": "none"}
-        if self.net and self.net != "tcp":
-            params["type"] = self.net
+        # Always include type (required by some clients like podkop)
+        params["type"] = self.net if self.net else "tcp"
         if self.tls:
             params["security"] = "tls"
             if self.sni:
