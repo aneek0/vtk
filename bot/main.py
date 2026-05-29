@@ -96,14 +96,8 @@ def _main_kb(s) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(
-                text=f"{'✅' if s.sub_passthrough else '❌'} Passthrough (raw JSON)",
+                text=f"{'✅' if s.sub_passthrough else '❌'} Passthrough (proxy link)",
                 callback_data="sub_passthrough",
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text=f"{'✅' if s.sub_links else '❌'} Share links from config",
-                callback_data="sub_links",
             )
         ],
     ]
@@ -252,13 +246,10 @@ async def cb_set_format(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=_main_kb(s), parse_mode=ParseMode.HTML)
 
 
-@router.callback_query(F.data.in_({"sub_passthrough", "sub_links"}))
-async def cb_toggle_mode(callback: CallbackQuery):
+@router.callback_query(F.data == "sub_passthrough")
+async def cb_toggle_passthrough(callback: CallbackQuery):
     s = load_settings()
-    if callback.data == "sub_passthrough":
-        s.sub_passthrough = not s.sub_passthrough
-    elif callback.data == "sub_links":
-        s.sub_links = not s.sub_links
+    s.sub_passthrough = not s.sub_passthrough
     save_settings(s)
     await callback.answer()
     text = "⚙️ <b>Settings</b>\n\nSelect output format for each input type:"
@@ -302,11 +293,15 @@ async def _process_input(message, text: str):
             content = await fetch_subscription(sub_url, timeout=s.timeout)
             sub_name = extract_subscription_name(sub_url, content)
 
-            # Passthrough: return original proxy JSON as-is
+            # Passthrough: return proxy URL instead of converting
             if s.sub_passthrough:
-                fmt = None
-                result = content
-                nodes = []
+                proxy_url = f"https://happy-decoder.cc/p/{sub_url}"
+                await status_msg.edit_text(
+                    f"✅ Subscription: «{sub_name}»\n\n"
+                    f"<code>{proxy_url}</code>",
+                    parse_mode=ParseMode.HTML,
+                )
+                return
             else:
                 nodes = parse_subscription_text(content)
                 if not nodes:
@@ -317,14 +312,9 @@ async def _process_input(message, text: str):
                 if not nodes:
                     await status_msg.edit_text("❌ No nodes found (tried share links and config parsing)")
                     return
-                # Share links mode: extract share links instead of full config
-                if s.sub_links:
-                    fmt = Format.TXT
-                    result = convert(nodes, fmt)
-                else:
-                    fmt = s.sub_format
-                    await status_msg.edit_text(f"✅ {len(nodes)} nodes «{sub_name}», converting to {fmt.value}...")
-                    result = convert(nodes, fmt, group_by_country=s.group_by_country)
+                fmt = s.sub_format
+                await status_msg.edit_text(f"✅ {len(nodes)} nodes «{sub_name}», converting to {fmt.value}...")
+                result = convert(nodes, fmt, group_by_country=s.group_by_country)
         except Exception as e:
             await status_msg.edit_text(f"❌ Error: {e}")
             return
