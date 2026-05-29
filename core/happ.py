@@ -77,11 +77,12 @@ def decrypt_text(text: str, api_key: str = "") -> str:
 
 
 async def fetch_sub_with_decrypt(url: str, api_key: str = "", timeout: int = 15) -> str:
-    """Fetch subscription URL via Happy Decoder proxy (decrypts happ:// links on-the-fly).
+    """Fetch subscription URL via Happy Decoder Universal Proxy.
 
-    No API key needed for proxy endpoint — uses /p/ endpoint directly.
+    Path-based proxy: https://happy-decoder.cc/p/<url>
+    No API key needed. Returns Xray JSON configs or decrypted subscription text.
     """
-    proxy_url = f"{API_BASE}/p/?u={quote(url, safe='')}"
+    proxy_url = f"{API_BASE}/p/{url}"
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         resp = await client.get(proxy_url, headers={"User-Agent": "Happ/3.17.0"})
         resp.raise_for_status()

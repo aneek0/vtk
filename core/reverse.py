@@ -265,10 +265,16 @@ def _yaml_proxy_to_node(p: dict) -> Optional[Node]:
 
 
 def _singbox_outbound_to_node(o: dict) -> Optional[Node]:
-    """Convert a sing-box outbound entry to Node."""
-    proto = o.get("type", "")
+    """Convert a sing-box or Xray outbound entry to Node."""
+    proto = o.get("type", "") or o.get("protocol", "")
     if not proto or proto in ("ssr", "selector", "urltest", "direct", "block", "dns"):
         return None
+
+    # Detect format: sing-box uses "server"/"server_port", Xray uses "settings.vnext"
+    is_xray = "settings" in o and "streamSettings" in o
+
+    if is_xray:
+        return _xray_outbound_to_node(o, proto)
 
     node = Node(
         protocol=proto if proto != "shadowsocks" else "ss",
@@ -316,6 +322,108 @@ def _singbox_outbound_to_node(o: dict) -> Optional[Node]:
     return node
 
 
+def _xray_outbound_to_node(o: dict, proto: str) -> Optional[Node]:
+    """Convert Xray-format outbound to Node."""
+    settings = o.get("settings", {})
+    stream = o.get("streamSettings", {})
+    tag = o.get("tag", "")
+
+    # Extract address/port from vnext (vless/vmess) or servers (trojan/ss)
+    address = ""
+    port = 0
+    uuid = ""
+    password = ""
+    flow = ""
+    method = ""
+
+    vnext = settings.get("vnext", [])
+    if vnext:
+        address = vnext[0].get("address", "")
+        port = vnext[0].get("port", 0)
+        users = vnext[0].get("users", [])
+        if users:
+            uuid = users[0].get("id", "")
+            flow = users[0].get("flow", "")
+            encryption = users[0].get("encryption", "")
+
+    servers = settings.get("servers", [])
+    if servers:
+        address = servers[0].get("address", "")
+        port = servers[0].get("port", 0)
+        users = servers[0].get("users", [])
+        if users:
+            uuid = users[0].get("id", "")
+            password = users[0].get("password", "")
+        method = servers[0].get("method", "")
+        password = servers[0].get("password", "") or password
+
+    # Shadowsocks in Xray
+    if proto == "shadowsocks" or proto == "ss":
+        ss_settings = settings.get("servers", [{}])[0] if servers else {}
+        address = ss_settings.get("address", address)
+        port = ss_settings.get("port", port)
+        method = ss_settings.get("method", "")
+        password = ss_settings.get("password", "")
+
+    if not address:
+        return None
+
+    net = stream.get("network", "tcp")
+    security = stream.get("security", "")
+
+    node = Node(
+        protocol="ss" if proto in ("shadowsocks", "ss") else proto,
+        address=address,
+        port=port,
+        name=tag,
+        uuid=uuid,
+        net=net,
+        flow=flow,
+        trojan_password=password,
+        ss_method=method,
+        ss_password=password,
+    )
+
+    # TLS / Reality
+    if security == "tls":
+        node.tls = True
+        tls_settings = stream.get("tlsSettings", {})
+        node.sni = tls_settings.get("serverName", "")
+        node.fp = tls_settings.get("fingerprint", "")
+        alpn = tls_settings.get("alpn", [])
+        if isinstance(alpn, list):
+            node.alpn = ",".join(alpn)
+    elif security == "reality":
+        node.tls = True
+        reality_settings = stream.get("realitySettings", {})
+        node.sni = reality_settings.get("serverName", "")
+        node.reality_pbk = reality_settings.get("publicKey", "")
+        node.reality_sid = reality_settings.get("shortId", "")
+        node.fp = reality_settings.get("fingerprint", "")
+
+    # Transport path/host
+    if net == "ws":
+        ws_settings = stream.get("wsSettings", {})
+        node.path = ws_settings.get("path", "")
+        headers = ws_settings.get("headers", {})
+        if headers:
+            node.host = headers.get("Host", "")
+    elif net == "grpc":
+        grpc_settings = stream.get("grpcSettings", {})
+        node.path = grpc_settings.get("serviceName", "")
+    elif net == "h2":
+        h2_settings = stream.get("httpSettings", {})
+        node.path = h2_settings.get("path", "")
+        host = h2_settings.get("host", [])
+        if isinstance(host, list) and host:
+            node.host = host[0]
+    elif net == "xhttp":
+        xhttp_settings = stream.get("xhttpSettings", {})
+        node.path = xhttp_settings.get("path", "")
+
+    return node
+
+
 def from_singbox(json_text: str) -> list[Node]:
     """Parse sing-box JSON config → list of Nodes."""
     try:
@@ -350,7 +458,7 @@ def from_mihomo(yaml_text: str) -> list[Node]:
 
 
 def from_config(text: str) -> list[Node]:
-    """Auto-detect config format (sing-box JSON / mihomo YAML) and parse."""
+    """Auto-detect config format (sing-box JSON / mihomo YAML / Xray JSON array) and parse."""
     text = text.strip()
     if not text:
         raise ParseError("Empty input")
@@ -358,6 +466,20 @@ def from_config(text: str) -> list[Node]:
     # Try JSON first
     if text.startswith("{"):
         return from_singbox(text)
+
+    # Try JSON array (Xray config array from Happy Decoder proxy)
+    if text.startswith("["):
+        try:
+            arr = json.loads(text)
+            if isinstance(arr, list):
+                nodes = []
+                for item in arr:
+                    if isinstance(item, dict):
+                        # Wrap single config in array for from_singbox
+                        nodes.extend(from_singbox(json.dumps(item)))
+                return nodes
+        except (json.JSONDecodeError, ParseError):
+            pass
 
     # Try YAML
     if "proxies:" in text or text.startswith("- name:"):

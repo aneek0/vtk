@@ -637,11 +637,24 @@ async def parse_subscription(url: str, timeout: int = 15) -> list[Node]:
 
 
 def parse_subscription_text(text: str) -> list[Node]:
-    """Parse already-fetched subscription text (may be base64)."""
+    """Parse already-fetched subscription text (may be base64).
+
+    Falls back to config parsing (reverse.from_config) if no share-links found.
+    """
     text = text.strip()
     if "\n" not in text and "\r" not in text:
         try:
             text = _b64decode(text)
         except Exception:
             pass
-    return parse_text_input(text)
+    nodes = parse_text_input(text)
+    # Filter out error nodes — they indicate unparseable content
+    real_nodes = [n for n in nodes if n.protocol != "error"]
+    if not real_nodes:
+        # Try direct JSON/YAML config parsing (Xray array, sing-box, mihomo)
+        try:
+            from core.reverse import from_config
+            real_nodes = from_config(text)
+        except Exception:
+            pass
+    return real_nodes
