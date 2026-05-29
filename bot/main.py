@@ -305,6 +305,11 @@ async def _process_input(message, text: str):
         nodes = [n for n in nodes if n.protocol != "error"]
         if not nodes:
             logger.warning(f"No valid nodes parsed. Input: {text[:100]}")
+            # Show what we got
+            all_nodes = parse_text_input(text)
+            errors = [n for n in all_nodes if n.protocol == "error"]
+            if errors:
+                logger.warning(f"Parse errors ({len(errors)}): {errors[0].name}")
             await message.reply(f"❌ No valid proxy links found in: <pre>{text[:200]}</pre>",
                                 parse_mode=ParseMode.HTML)
             return
@@ -336,8 +341,10 @@ async def _process_input(message, text: str):
         filename = f"config.{ext}"
     if len(result) > 3000:
         await _reply_as_file(message, result, filename)
-    else:
+    elif result.strip():
         await message.reply(f"<pre>{result}</pre>", parse_mode=ParseMode.HTML)
+    else:
+        await message.reply(f"❌ Empty result — {len(nodes)} nodes parsed but nothing to output")
 
 
 @router.message(F.document)
