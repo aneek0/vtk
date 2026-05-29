@@ -293,28 +293,33 @@ async def _process_input(message, text: str):
             content = await fetch_subscription(sub_url, timeout=s.timeout)
             sub_name = extract_subscription_name(sub_url, content)
 
-            # Passthrough: return proxy URL instead of converting
+            # Always parse nodes for conversion
+            nodes = parse_subscription_text(content)
+            if not nodes:
+                try:
+                    nodes = from_config(content)
+                except Exception:
+                    pass
+
+            # Passthrough: also send proxy URL
             if s.sub_passthrough:
                 proxy_url = f"https://happy-decoder.cc/p/{sub_url}"
-                await status_msg.edit_text(
-                    f"✅ Subscription: «{sub_name}»\n\n"
-                    f"<code>{proxy_url}</code>",
+                await message.reply(
+                    f"🔗 <b>Proxy link:</b>\n<code>{proxy_url}</code>\n\n"
+                    f"📋 Parsed {len(nodes)} nodes «{sub_name}»",
                     parse_mode=ParseMode.HTML,
                 )
-                return
-            else:
-                nodes = parse_subscription_text(content)
-                if not nodes:
-                    try:
-                        nodes = from_config(content)
-                    except Exception:
-                        pass
-                if not nodes:
+
+            if not nodes:
+                if not s.sub_passthrough:
                     await status_msg.edit_text("❌ No nodes found (tried share links and config parsing)")
-                    return
-                fmt = s.sub_format
-                await status_msg.edit_text(f"✅ {len(nodes)} nodes «{sub_name}», converting to {fmt.value}...")
-                result = convert(nodes, fmt, group_by_country=s.group_by_country)
+                else:
+                    await status_msg.delete()
+                return
+
+            fmt = s.sub_format
+            await status_msg.edit_text(f"✅ {len(nodes)} nodes «{sub_name}», converting to {fmt.value}...")
+            result = convert(nodes, fmt, group_by_country=s.group_by_country)
         except Exception as e:
             await status_msg.edit_text(f"❌ Error: {e}")
             return
