@@ -544,15 +544,18 @@ _UA_LIST = [
 ]
 
 
-async def fetch_subscription(url: str, timeout: int = 15, user_agent: str = "") -> str:
+async def fetch_subscription(url: str, timeout: int = 15, user_agent: str = "", hwid: str = "") -> str:
     """Fetch subscription content from URL.
 
     If user_agent is empty, tries a list of known UA strings.
+    If hwid is provided, sends it as X-HWID header.
     """
     uas = [user_agent] if user_agent else _UA_LIST
     last_err = ""
     for ua in uas:
         headers = {"User-Agent": ua}
+        if hwid:
+            headers["X-HWID"] = hwid
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
             try:
                 resp = await client.get(url)

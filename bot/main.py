@@ -274,14 +274,22 @@ async def _process_input(message, text: str):
             import asyncio
             from core.logic import fetch_subscription, extract_subscription_name
             sub_url = text.strip()
-            content = await fetch_subscription(sub_url, timeout=s.timeout)
+            content = await fetch_subscription(sub_url, timeout=s.timeout,
+                                                user_agent=s.sub_user_agent,
+                                                hwid=s.sub_hwid)
             sub_name = extract_subscription_name(sub_url, content)
             nodes = parse_subscription_text(content)
         except Exception as e:
             await status_msg.edit_text(f"❌ Error: {e}")
             return
         if not nodes:
-            await status_msg.edit_text("❌ No nodes found")
+            # Fallback: content might be Xray/sing-box JSON config
+            try:
+                nodes = from_config(content)
+            except Exception:
+                pass
+        if not nodes:
+            await status_msg.edit_text("❌ No nodes found (tried share links and config parsing)")
             return
         fmt = s.sub_format
         await status_msg.edit_text(f"✅ {len(nodes)} nodes «{sub_name}», converting to {fmt.value}...")

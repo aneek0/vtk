@@ -38,6 +38,12 @@ class Settings:
     # Group FlClash proxy-groups by country (from node name emoji)
     group_by_country: bool = False
 
+    # Custom User-Agent for subscription fetching (empty = auto-detect)
+    sub_user_agent: str = ""
+
+    # HWID for providers that require device identification (e.g., Happ)
+    sub_hwid: str = ""
+
 
 def load_settings(path: str = "") -> Settings:
     path = path or DEFAULT_SETTINGS_PATH
@@ -69,4 +75,6 @@ def save_settings(settings: Settings, path: str = "") -> None:
     data["timeout"] = settings.timeout
     data["happ_key"] = settings.happ_key
     data["group_by_country"] = settings.group_by_country
+    data["sub_user_agent"] = settings.sub_user_agent
+    data["sub_hwid"] = settings.sub_hwid
     f.write_text(json.dumps(data, indent=2, ensure_ascii=False))
