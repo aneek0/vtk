@@ -301,7 +301,7 @@ async def _process_input(message, text: str):
                 except Exception:
                     pass
 
-            # Passthrough: also send proxy URL
+            # Passthrough: send proxy URL + raw JSON file
             if s.sub_passthrough:
                 proxy_url = f"https://happy-decoder.cc/p/{sub_url}"
                 await message.reply(
@@ -309,6 +309,10 @@ async def _process_input(message, text: str):
                     f"📋 Parsed {len(nodes)} nodes «{sub_name}»",
                     parse_mode=ParseMode.HTML,
                 )
+                # Send raw proxy JSON as file
+                safe_name = "".join(c for c in sub_name if c.isalnum() or c in "._- ")[:50].strip() or "config"
+                raw_file = BufferedInputFile(content.encode(), filename=f"{safe_name}_raw.json")
+                await message.reply_document(raw_file, caption="📦 Raw proxy JSON (full config)")
 
             if not nodes:
                 if not s.sub_passthrough:
