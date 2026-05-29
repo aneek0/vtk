@@ -534,9 +534,15 @@ def iter_parse_text(text: str):
 # Subscription fetching
 # ---------------------------------------------------------------------------
 
-async def fetch_subscription(url: str, timeout: int = 15) -> str:
+async def fetch_subscription(url: str, timeout: int = 15, user_agent: str = "") -> str:
     """Fetch subscription content from URL."""
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+    headers = {}
+    if user_agent:
+        headers["User-Agent"] = user_agent
+    else:
+        # Default: mimic a common client
+        headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
         resp = await client.get(url)
         resp.raise_for_status()
         content = resp.text.strip()
