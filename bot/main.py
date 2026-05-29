@@ -124,7 +124,7 @@ def _resolve_format(s, input_type: str) -> Format:
 
 
 def _fmt_ext(fmt: Format) -> str:
-    return {"singbox": "json", "mihomo": "yaml", "flclash": "yaml", "txt": "txt"}.get(fmt.value, "txt")
+    return {"singbox": "json", "mihomo": "yaml", "flclash": "yaml", "txt": "txt", "xray": "json"}.get(fmt.value, "txt")
 
 
 # ---------------------------------------------------------------------------

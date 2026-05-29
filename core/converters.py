@@ -33,6 +33,7 @@ class Format(str, Enum):
     MIHOMO = "mihomo"
     FLCLASH = "flclash"
     TXT = "txt"
+    XRAY = "xray"
 
 
 def _yaml_escape(s: str) -> str:
@@ -422,6 +423,262 @@ def _flclash_tls(lines: list, node: Node):
 
 
 # ---------------------------------------------------------------------------
+# Xray JSON — full client config with routing, dns, inbounds, observatory
+# ---------------------------------------------------------------------------
+
+def to_xray(nodes: list[Node], tag_prefix: str = "") -> str:
+    """Generate a complete Xray JSON client config (array of configs, one per group).
+
+    Each proxy gets a 'proxy' tag, with direct/block fallbacks.
+    Includes: inbounds (socks+http), dns, routing, observatory, burstObservatory.
+    """
+    outbounds = []
+    for i, node in enumerate(nodes):
+        if node.protocol == "ssr":
+            continue
+        tag = node.name if node.name else f"{tag_prefix}{node.protocol}-{i}"
+        o = _node_to_xray_outbound(node, tag)
+        if o:
+            outbounds.append(o)
+
+    if not outbounds:
+        raise ParseError("No convertible nodes")
+
+    # Add direct and block
+    outbounds.append({"tag": "direct", "protocol": "freedom"})
+    outbounds.append({"tag": "block", "protocol": "blackhole"})
+
+    # Extract country from first node name for remarks
+    remarks = ""
+    for n in nodes:
+        if n.name:
+            country = extract_country(n.name)
+            if country:
+                remarks = country
+                break
+
+    config = {
+        "dns": {
+            "servers": ["1.1.1.1", "1.0.0.1"],
+            "queryStrategy": "UseIPv4",
+        },
+        "routing": {
+            "rules": [
+                {"type": "field", "protocol": ["bittorrent"], "outboundTag": "direct"},
+                {
+                    "type": "field",
+                    "network": "tcp,udp",
+                    "balancerTag": "Super_Balancer",
+                },
+            ],
+            "balancers": [
+                {
+                    "tag": "Super_Balancer",
+                    "selector": ["proxy"],
+                    "strategy": {
+                        "type": "leastLoad",
+                        "settings": {
+                            "maxRTT": "1s",
+                            "expected": 2,
+                            "baselines": ["1s"],
+                            "tolerance": 0.01,
+                        },
+                    },
+                    "fallbackTag": "direct",
+                }
+            ],
+            "domainMatcher": "hybrid",
+            "domainStrategy": "IPIfNonMatch",
+        },
+        "inbounds": [
+            {
+                "tag": "socks",
+                "port": 10808,
+                "listen": "127.0.0.1",
+                "protocol": "socks",
+                "settings": {"udp": True, "auth": "noauth"},
+                "sniffing": {
+                    "enabled": True,
+                    "routeOnly": False,
+                    "destOverride": ["http", "tls", "quic"],
+                },
+            },
+            {
+                "tag": "http",
+                "port": 10809,
+                "listen": "127.0.0.1",
+                "protocol": "http",
+                "settings": {"allowTransparent": False},
+                "sniffing": {
+                    "enabled": True,
+                    "routeOnly": False,
+                    "destOverride": ["http", "tls", "quic"],
+                },
+            },
+        ],
+        "outbounds": outbounds,
+        "burstObservatory": {
+            "pingConfig": {
+                "timeout": "3s",
+                "interval": "1m",
+                "sampling": 1,
+                "destination": "http://www.gstatic.com/generate_204",
+                "connectivity": "",
+            },
+            "subjectSelector": ["proxy"],
+        },
+        "remarks": remarks,
+    }
+
+    return _json_dumps(config)
+
+
+def _node_to_xray_outbound(node: Node, tag: str) -> Optional[dict]:
+    """Convert a Node to Xray outbound format."""
+    o = {"tag": tag, "protocol": node.protocol}
+
+    if node.protocol == "vless":
+        o["settings"] = {
+            "vnext": [{
+                "address": node.address,
+                "port": node.port,
+                "users": [{
+                    "id": node.uuid,
+                    "encryption": "none",
+                    "flow": node.flow or "",
+                }],
+            }]
+        }
+    elif node.protocol == "vmess":
+        o["settings"] = {
+            "vnext": [{
+                "address": node.address,
+                "port": node.port,
+                "users": [{
+                    "id": node.uuid,
+                    "alterId": node.vmess_aid,
+                    "security": node.vmess_scy,
+                }],
+            }]
+        }
+    elif node.protocol == "trojan":
+        o["settings"] = {
+            "servers": [{
+                "address": node.address,
+                "port": node.port,
+                "password": node.trojan_password,
+            }]
+        }
+    elif node.protocol == "ss":
+        o["settings"] = {
+            "servers": [{
+                "address": node.address,
+                "port": node.port,
+                "method": node.ss_method,
+                "password": node.ss_password,
+            }]
+        }
+    elif node.protocol == "shadowsocks":
+        o["settings"] = {
+            "servers": [{
+                "address": node.address,
+                "port": node.port,
+                "method": node.ss_method,
+                "password": node.ss_password,
+            }]
+        }
+    elif node.protocol == "socks":
+        o["settings"] = {
+            "servers": [{
+                "address": node.address,
+                "port": node.port,
+            }]
+        }
+        if node.socks_username:
+            o["settings"]["servers"][0]["users"] = [{
+                "user": node.socks_username,
+                "pass": node.socks_password,
+            }]
+    else:
+        return None
+
+    # Stream settings
+    stream = _xray_stream_settings(node)
+    if stream:
+        o["streamSettings"] = stream
+
+    return o
+
+
+def _xray_stream_settings(node: Node) -> Optional[dict]:
+    """Build streamSettings for Xray outbound."""
+    net = node.net or "tcp"
+    if net == "tcp" and not node.tls and not node.reality_pbk:
+        return None
+
+    stream = {"network": net}
+
+    # Security
+    if node.reality_pbk:
+        stream["security"] = "reality"
+        stream["realitySettings"] = {
+            "serverName": node.sni or node.address,
+            "publicKey": node.reality_pbk,
+            "fingerprint": node.fp or "chrome",
+        }
+        if node.reality_sid:
+            stream["realitySettings"]["shortId"] = node.reality_sid
+    elif node.tls:
+        stream["security"] = "tls"
+        tls_settings = {}
+        if node.sni:
+            tls_settings["serverName"] = node.sni
+        if node.fp:
+            tls_settings["fingerprint"] = node.fp
+        if node.alpn:
+            tls_settings["alpn"] = node.alpn.split(",") if "," in node.alpn else [node.alpn]
+        if tls_settings:
+            stream["tlsSettings"] = tls_settings
+
+    # Transport
+    if net == "ws":
+        ws = {}
+        if node.path:
+            ws["path"] = node.path
+        if node.host:
+            ws["headers"] = {"Host": node.host}
+        if ws:
+            stream["wsSettings"] = ws
+    elif net == "grpc":
+        grpc = {}
+        if node.path:
+            grpc["serviceName"] = node.path
+        if grpc:
+            stream["grpcSettings"] = grpc
+    elif net == "h2":
+        h2 = {}
+        if node.path:
+            h2["path"] = node.path
+        if node.host:
+            h2["host"] = [node.host] if isinstance(node.host, str) else node.host
+        if h2:
+            stream["httpSettings"] = h2
+    elif net == "xhttp":
+        xhttp = {}
+        if node.path:
+            xhttp["path"] = node.path
+        if xhttp:
+            stream["xhttpSettings"] = xhttp
+    elif net == "tcp" and not stream.get("security"):
+        # Pure TCP, no security — still need tcpSettings for consistency
+        stream["tcpSettings"] = {}
+
+    return stream if (stream.get("security") or stream.get("network") != "tcp" or
+                       stream.get("wsSettings") or stream.get("grpcSettings") or
+                       stream.get("httpSettings") or stream.get("xhttpSettings")) else None
+
+
+# ---------------------------------------------------------------------------
 # plain txt
 # ---------------------------------------------------------------------------
 
@@ -480,6 +737,7 @@ _CONVERTERS = {
     Format.MIHOMO: to_mihomo,
     Format.FLCLASH: to_flclash,
     Format.TXT: to_txt,
+    Format.XRAY: to_xray,
 }
 
 
@@ -489,6 +747,6 @@ def convert(nodes: list[Node], fmt: Format, tag_prefix: str = "", group_by_count
         raise ParseError(f"Unsupported format: {fmt}")
     if fmt == Format.FLCLASH:
         return converter(nodes, tag_prefix=tag_prefix, group_by_country=group_by_country)
-    if fmt == Format.TXT:
+    if fmt in (Format.TXT, Format.XRAY):
         return converter(nodes)
     return converter(nodes, tag_prefix=tag_prefix)

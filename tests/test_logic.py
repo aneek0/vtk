@@ -1,5 +1,6 @@
 """Tests for core logic — parsers, converters, edge cases."""
 
+import json
 import pytest
 from core.logic import (
     Node, ParseError, fix_link, parse_vless, parse_vmess, parse_trojan,
@@ -295,6 +296,32 @@ class TestConverters:
         result = convert(nodes, Format.TXT)
         assert result.startswith("vless://")
         assert "type=tcp" in result
+
+    def test_xray(self):
+        nodes = [parse_vless(VLESS_LINK)]
+        result = convert(nodes, Format.XRAY)
+        data = json.loads(result)
+        assert "outbounds" in data
+        assert "routing" in data
+        assert "dns" in data
+        assert "inbounds" in data
+        assert "burstObservatory" in data
+        # Check proxy outbound (tag = node display_name)
+        proxy = [o for o in data["outbounds"] if o["protocol"] == "vless"][0]
+        assert "vnext" in proxy["settings"]
+        # Check direct/block
+        tags = [o["tag"] for o in data["outbounds"]]
+        assert "direct" in tags
+        assert "block" in tags
+
+    def test_xray_with_reality(self):
+        link = VLESS_LINK  # has reality
+        nodes = [parse_vless(link)]
+        result = convert(nodes, Format.XRAY)
+        data = json.loads(result)
+        proxy = [o for o in data["outbounds"] if o["protocol"] == "vless"][0]
+        assert proxy["streamSettings"]["security"] == "reality"
+        assert "realitySettings" in proxy["streamSettings"]
 
     def test_empty_nodes(self):
         with pytest.raises(ParseError):

@@ -38,11 +38,8 @@ class Settings:
     # Group FlClash proxy-groups by country (from node name emoji)
     group_by_country: bool = False
 
-    # Custom User-Agent for subscription fetching (empty = auto-detect)
-    sub_user_agent: str = ""
-
-    # HWID for providers that require device identification (e.g., Happ)
-    sub_hwid: str = ""
+    sub_user_agent: str = ""  # deprecated, kept for compat
+    sub_hwid: str = ""  # deprecated, kept for compat
 
 
 def load_settings(path: str = "") -> Settings:
