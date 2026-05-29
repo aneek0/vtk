@@ -582,15 +582,20 @@ def extract_subscription_name(url: str, content: str, resp_headers: dict | None 
             if title:
                 return title[:100]  # limit length
 
-    # 3. URL path last segment
+    # 3. URL path segments (skip file-like names)
     from urllib.parse import urlparse
     parsed = urlparse(url)
     path_parts = [p for p in parsed.path.split("/") if p]
-    if path_parts:
-        last = path_parts[-1]
-        # Skip generic names
-        if last not in ("sub", "config", "download", "api", "get"):
-            return last[:100]
+    # File-like patterns: digits.txt, 1.bin, config.yaml, etc.
+    import re
+    _FILE_RE = re.compile(r'^(\d+\.(txt|bin|yaml|yml|json|conf|dat)|\w+\.(txt|bin|yaml|yml|json|conf|dat))$', re.I)
+    # Try last segment first, then walk backwards
+    for part in reversed(path_parts):
+        if part in ("sub", "config", "download", "api", "get"):
+            continue
+        if _FILE_RE.match(part):
+            continue
+        return part[:100]
 
     # 4. hostname
     return parsed.hostname or "subscription"
