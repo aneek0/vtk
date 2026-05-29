@@ -274,9 +274,7 @@ async def _process_input(message, text: str):
             import asyncio
             from core.logic import fetch_subscription, extract_subscription_name
             sub_url = text.strip()
-            content = await fetch_subscription(sub_url, timeout=s.timeout,
-                                                user_agent=s.sub_user_agent,
-                                                hwid=s.sub_hwid)
+            content = await fetch_subscription(sub_url, timeout=s.timeout)
             sub_name = extract_subscription_name(sub_url, content)
             nodes = parse_subscription_text(content)
         except Exception as e:

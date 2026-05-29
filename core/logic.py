@@ -544,36 +544,14 @@ _UA_LIST = [
 ]
 
 
-async def fetch_subscription(url: str, timeout: int = 15, user_agent: str = "", hwid: str = "") -> str:
-    """Fetch subscription content from URL.
+async def fetch_subscription(url: str, timeout: int = 15) -> str:
+    """Fetch subscription content from URL via Happy Decoder Universal Proxy.
 
-    If user_agent is empty, tries a list of known UA strings.
-    If hwid is provided, sends it as X-HWID header.
+    Uses https://happy-decoder.cc/p/<url> — handles HWID, device emulation,
+    and happ:// decryption automatically.
     """
-    uas = [user_agent] if user_agent else _UA_LIST
-    last_err = ""
-    for ua in uas:
-        headers = {"User-Agent": ua}
-        if hwid:
-            headers["X-HWID"] = hwid
-        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
-            try:
-                resp = await client.get(url)
-                if resp.status_code >= 500:
-                    last_err = f"HTTP {resp.status_code} with UA: {ua[:30]}..."
-                    continue
-                resp.raise_for_status()
-                content = resp.text.strip()
-                if "\n" not in content and "\r" not in content:
-                    try:
-                        content = _b64decode(content)
-                    except Exception:
-                        pass
-                return content
-            except Exception as e:
-                last_err = str(e)
-                continue
-    raise Exception(last_err or "All UA attempts failed")
+    from core.happ import fetch_sub_with_decrypt
+    return await fetch_sub_with_decrypt(url, timeout=timeout)
 
 
 def extract_subscription_name(url: str, content: str, resp_headers: dict | None = None) -> str:
