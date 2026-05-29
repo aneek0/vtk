@@ -256,6 +256,7 @@ async def _process_input(message, text: str):
     """Process text input and reply with converted output."""
     s = load_settings()
     input_type = _detect_input(text)
+    sub_name = ""  # extracted subscription name for filename
 
     # Decrypt happ:// links before processing
     from core.happ import is_happ, decrypt_text, _get_key
@@ -271,8 +272,10 @@ async def _process_input(message, text: str):
         status_msg = await message.reply("⏳ Fetching subscription...")
         try:
             import asyncio
-            from core.logic import fetch_subscription
-            content = await fetch_subscription(text.strip(), timeout=s.timeout)
+            from core.logic import fetch_subscription, extract_subscription_name
+            sub_url = text.strip()
+            content = await fetch_subscription(sub_url, timeout=s.timeout)
+            sub_name = extract_subscription_name(sub_url, content)
             nodes = parse_subscription_text(content)
         except Exception as e:
             await status_msg.edit_text(f"❌ Error: {e}")
@@ -281,7 +284,7 @@ async def _process_input(message, text: str):
             await status_msg.edit_text("❌ No nodes found")
             return
         fmt = s.sub_format
-        await status_msg.edit_text(f"✅ {len(nodes)} nodes, converting to {fmt.value}...")
+        await status_msg.edit_text(f"✅ {len(nodes)} nodes «{sub_name}», converting to {fmt.value}...")
 
     # Config (JSON / YAML) → reverse to share links
     elif input_type == "config":
@@ -325,8 +328,14 @@ async def _process_input(message, text: str):
 
     ext = _fmt_ext(fmt)
     logger.info(f"Result: {len(result)} chars, ext={ext}")
+    # Build filename: use subscription name if available
+    if sub_name:
+        safe_name = "".join(c for c in sub_name if c.isalnum() or c in "._- ")[:50].strip()
+        filename = f"{safe_name}.{ext}"
+    else:
+        filename = f"config.{ext}"
     if len(result) > 3000:
-        await _reply_as_file(message, result, f"config.{ext}")
+        await _reply_as_file(message, result, filename)
     else:
         await message.reply(f"<pre>{result}</pre>", parse_mode=ParseMode.HTML)
 

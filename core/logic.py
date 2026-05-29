@@ -548,6 +548,54 @@ async def fetch_subscription(url: str, timeout: int = 15) -> str:
         return content
 
 
+def extract_subscription_name(url: str, content: str, resp_headers: dict | None = None) -> str:
+    """Extract a human-readable name for a subscription.
+
+    Tries in order:
+    1. Content-Disposition header (filename)
+    2. #profile-title: comment in content (Clash/V2Ray format)
+    3. URL path last segment
+    4. hostname from URL
+    """
+    # 1. Content-Disposition header
+    if resp_headers:
+        cd = resp_headers.get("content-disposition", "")
+        if "filename*" in cd:
+            # RFC 5987: filename*=UTF-8''encoded_name
+            import re
+            m = re.search(r"filename\*\s*=\s*UTF-8''(.+?)(?:;|$)", cd, re.I)
+            if m:
+                return unquote(m.group(1))
+        if "filename=" in cd:
+            import re
+            m = re.search(r'filename\s*=\s*["\']?([^"\';\r\n]+)', cd, re.I)
+            if m:
+                name = m.group(1).strip()
+                if name and name not in ("1.bin", "download", "sub", "config"):
+                    return name
+
+    # 2. #profile-title: in content
+    for line in content.splitlines():
+        line = line.strip()
+        if line.startswith("#profile-title:"):
+            title = line.split(":", 1)[1].strip()
+            if title:
+                return title[:100]  # limit length
+
+    # 3. URL path last segment
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    path_parts = [p for p in parsed.path.split("/") if p]
+    if path_parts:
+        last = path_parts[-1]
+        # Skip generic names
+        if last not in ("sub", "config", "download", "api", "get"):
+            return last[:100]
+
+    # 4. hostname
+    return parsed.hostname or "subscription"
+
+
 async def parse_subscription(url: str, timeout: int = 15) -> list[Node]:
     """Fetch and parse a subscription URL."""
     content = await fetch_subscription(url, timeout)
