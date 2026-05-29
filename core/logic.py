@@ -536,6 +536,7 @@ def iter_parse_text(text: str):
 
 _UA_LIST = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Happ/3.21.1",
     "v2rayNG/1.8.29",
     "ClashMetaForAndroid/2.12.0",
     "sing-box/1.9.0",
