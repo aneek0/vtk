@@ -505,6 +505,9 @@ def parse_text_input(text: str) -> list[Node]:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
+        # Additional safety: fix_link handles & -> ? normalization
+        # This catches cases where urlparse would fail on malformed ports
+        line = fix_link(line)
         try:
             nodes.append(parse_link(line))
         except ParseError as e:
