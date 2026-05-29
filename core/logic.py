@@ -534,24 +534,42 @@ def iter_parse_text(text: str):
 # Subscription fetching
 # ---------------------------------------------------------------------------
 
+_UA_LIST = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "v2rayNG/1.8.29",
+    "ClashMetaForAndroid/2.12.0",
+    "sing-box/1.9.0",
+    "V2Ray/5.0.0",
+]
+
+
 async def fetch_subscription(url: str, timeout: int = 15, user_agent: str = "") -> str:
-    """Fetch subscription content from URL."""
-    headers = {}
-    if user_agent:
-        headers["User-Agent"] = user_agent
-    else:
-        # Default: mimic a common client
-        headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        content = resp.text.strip()
-        if "\n" not in content and "\r" not in content:
+    """Fetch subscription content from URL.
+
+    If user_agent is empty, tries a list of known UA strings.
+    """
+    uas = [user_agent] if user_agent else _UA_LIST
+    last_err = ""
+    for ua in uas:
+        headers = {"User-Agent": ua}
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
             try:
-                content = _b64decode(content)
-            except Exception:
-                pass
-        return content
+                resp = await client.get(url)
+                if resp.status_code >= 500:
+                    last_err = f"HTTP {resp.status_code} with UA: {ua[:30]}..."
+                    continue
+                resp.raise_for_status()
+                content = resp.text.strip()
+                if "\n" not in content and "\r" not in content:
+                    try:
+                        content = _b64decode(content)
+                    except Exception:
+                        pass
+                return content
+            except Exception as e:
+                last_err = str(e)
+                continue
+    raise Exception(last_err or "All UA attempts failed")
 
 
 def extract_subscription_name(url: str, content: str, resp_headers: dict | None = None) -> str:
