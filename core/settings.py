@@ -41,6 +41,10 @@ class Settings:
     sub_user_agent: str = ""  # deprecated, kept for compat
     sub_hwid: str = ""  # deprecated, kept for compat
 
+    # Subscription output mode
+    sub_passthrough: bool = False  # return original proxy JSON as-is (no conversion)
+    sub_links: bool = False  # extract share links from config nodes instead of full config
+
 
 def load_settings(path: str = "") -> Settings:
     path = path or DEFAULT_SETTINGS_PATH
@@ -74,4 +78,6 @@ def save_settings(settings: Settings, path: str = "") -> None:
     data["group_by_country"] = settings.group_by_country
     data["sub_user_agent"] = settings.sub_user_agent
     data["sub_hwid"] = settings.sub_hwid
+    data["sub_passthrough"] = settings.sub_passthrough
+    data["sub_links"] = settings.sub_links
     f.write_text(json.dumps(data, indent=2, ensure_ascii=False))

@@ -68,7 +68,7 @@ def _format_kb(prefix: str, current: Format) -> InlineKeyboardMarkup:
 
 
 def _main_kb(s) -> InlineKeyboardMarkup:
-    """Build main settings keyboard — 3 sections + txt."""
+    """Build main settings keyboard — format sections + subscription modes."""
     rows = [
         [
             InlineKeyboardButton(
@@ -92,6 +92,18 @@ def _main_kb(s) -> InlineKeyboardMarkup:
             InlineKeyboardButton(
                 text=f"📝 TXT → {s.txt_format.value}",
                 callback_data=CB_TXT_FMT,
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=f"{'✅' if s.sub_passthrough else '❌'} Passthrough (raw JSON)",
+                callback_data="sub_passthrough",
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=f"{'✅' if s.sub_links else '❌'} Share links from config",
+                callback_data="sub_links",
             )
         ],
     ]
@@ -240,6 +252,19 @@ async def cb_set_format(callback: CallbackQuery):
     await callback.message.edit_text(text, reply_markup=_main_kb(s), parse_mode=ParseMode.HTML)
 
 
+@router.callback_query(F.data.in_({"sub_passthrough", "sub_links"}))
+async def cb_toggle_mode(callback: CallbackQuery):
+    s = load_settings()
+    if callback.data == "sub_passthrough":
+        s.sub_passthrough = not s.sub_passthrough
+    elif callback.data == "sub_links":
+        s.sub_links = not s.sub_links
+    save_settings(s)
+    await callback.answer()
+    text = "⚙️ <b>Settings</b>\n\nSelect output format for each input type:"
+    await callback.message.edit_text(text, reply_markup=_main_kb(s), parse_mode=ParseMode.HTML)
+
+
 @router.callback_query(F.data == "back")
 async def cb_back(callback: CallbackQuery):
     s = load_settings()
@@ -276,21 +301,33 @@ async def _process_input(message, text: str):
             sub_url = text.strip()
             content = await fetch_subscription(sub_url, timeout=s.timeout)
             sub_name = extract_subscription_name(sub_url, content)
-            nodes = parse_subscription_text(content)
+
+            # Passthrough: return original proxy JSON as-is
+            if s.sub_passthrough:
+                fmt = None
+                result = content
+                nodes = []
+            else:
+                nodes = parse_subscription_text(content)
+                if not nodes:
+                    try:
+                        nodes = from_config(content)
+                    except Exception:
+                        pass
+                if not nodes:
+                    await status_msg.edit_text("❌ No nodes found (tried share links and config parsing)")
+                    return
+                # Share links mode: extract share links instead of full config
+                if s.sub_links:
+                    fmt = Format.TXT
+                    result = convert(nodes, fmt)
+                else:
+                    fmt = s.sub_format
+                    await status_msg.edit_text(f"✅ {len(nodes)} nodes «{sub_name}», converting to {fmt.value}...")
+                    result = convert(nodes, fmt, group_by_country=s.group_by_country)
         except Exception as e:
             await status_msg.edit_text(f"❌ Error: {e}")
             return
-        if not nodes:
-            # Fallback: content might be Xray/sing-box JSON config
-            try:
-                nodes = from_config(content)
-            except Exception:
-                pass
-        if not nodes:
-            await status_msg.edit_text("❌ No nodes found (tried share links and config parsing)")
-            return
-        fmt = s.sub_format
-        await status_msg.edit_text(f"✅ {len(nodes)} nodes «{sub_name}», converting to {fmt.value}...")
 
     # Config (JSON / YAML) → reverse to share links
     elif input_type == "config":
@@ -330,14 +367,15 @@ async def _process_input(message, text: str):
         input_msg = f"✅ {len(nodes)} nodes"
         logger.info(f"Parsed {len(nodes)} nodes, format={fmt.value}")
 
-    # Convert
-    try:
-        result = convert(nodes, fmt, group_by_country=s.group_by_country)
-    except ParseError as e:
-        await message.reply(f"❌ {e}")
-        return
+    # Convert (skip for passthrough — result already set)
+    if fmt is not None and result is None:
+        try:
+            result = convert(nodes, fmt, group_by_country=s.group_by_country)
+        except ParseError as e:
+            await message.reply(f"❌ {e}")
+            return
 
-    ext = _fmt_ext(fmt)
+    ext = _fmt_ext(fmt) if fmt else "json"
     logger.info(f"Result: {len(result)} chars, ext={ext}")
     # Build filename: use subscription name if available
     if sub_name:
