@@ -4,8 +4,11 @@ version = "0.1.0"
 description = "VLESS Toolkit — parse, convert proxy links & subscriptions"
 requires-python = ">=3.10"
 dependencies = [
+    "fastapi>=0.136.3",
     "httpx",
     "orjson",
+    "python-multipart>=0.0.32",
+    "uvicorn>=0.48.0",
 ]
 
 [build-system]
@@ -19,7 +22,7 @@ cli = ["typer"]
 dev = ["ruff", "pytest"]
 
 [project.scripts]
-vtk = "cli.main:app"
+vtk = "cli.main:main"
 
 [tool.setuptools.packages.find]
 include = ["core*", "cli*", "bot*", "web*"]
