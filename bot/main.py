@@ -270,6 +270,7 @@ async def cb_back(callback: CallbackQuery):
 
 async def _process_input(message, text: str):
     """Process text input and reply with converted output."""
+    t_start = time.perf_counter()
     s = load_settings()
     input_type = _detect_input(text)
     sub_name = ""  # extracted subscription name for filename
@@ -366,6 +367,8 @@ async def _process_input(message, text: str):
         input_msg = f"✅ {len(nodes)} nodes"
         logger.info(f"Parsed {len(nodes)} nodes, format={fmt.value}")
 
+    result = None
+
     # Convert (skip for passthrough — result already set)
     if fmt is not None and result is None:
         try:
@@ -373,6 +376,9 @@ async def _process_input(message, text: str):
         except ParseError as e:
             await message.reply(f"❌ {e}")
             return
+
+    t_done = time.perf_counter()
+    logger.info(f"Total processing: {(t_done - t_start)*1000:.0f}ms")
 
     ext = _fmt_ext(fmt) if fmt else "json"
     logger.info(f"Result: {len(result)} chars, ext={ext}")
@@ -432,7 +438,7 @@ async def main():
     dp = Dispatcher()
     dp.include_router(router)
     await _set_commands(bot)
-    await dp.start_polling(bot)
+    await dp.start_polling(bot, poll_interval=0)
 
 
 if __name__ == "__main__":
