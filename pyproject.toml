@@ -8,7 +8,6 @@ dependencies = [
     "httpx",
     "orjson",
     "python-multipart>=0.0.32",
-    "typer>=0.26",
     "uvicorn>=0.48.0",
 ]
 
