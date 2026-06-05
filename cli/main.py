@@ -255,30 +255,46 @@ def cmd_interactive(args):
     print(result)
 
 
+def _fmt_ext(fmt: Format) -> str:
+    return {"singbox": "json", "mihomo": "yaml", "flclash": "yaml", "txt": "txt", "xray": "json"}.get(fmt.value, "txt")
+
+
+def _safe_filename(name: str, ext: str) -> str:
+    safe = "".join(c for c in name if c.isalnum() or c in "._- ")[:50].strip()
+    return f"{safe}.{ext}" if safe else f"config.{ext}"
+
+
 def cmd_sub(args):
+    from core.logic import extract_subscription_name
+
     async def _fetch():
         from core.logic import fetch_subscription
         return await fetch_subscription(args.url)
 
     try:
         content = asyncio.run(_fetch())
+        sub_name = extract_subscription_name(args.url, content)
         nodes = parse_subscription_text(content)
         if not nodes:
             nodes = from_config_reverse(content)
         if not nodes:
             print("❌ No nodes found in subscription", file=sys.stderr)
             sys.exit(1)
-        result = convert(nodes, Format(args.format))
+        fmt = Format(args.format)
+        result = convert(nodes, fmt)
     except ParseError as e:
         print(f"❌ {e}", file=sys.stderr)
         sys.exit(1)
 
     if args.output:
-        with open(args.output, "w") as f:
-            f.write(result)
-        print(f"Converted {len(nodes)} nodes → {args.output}")
+        out_path = args.output
     else:
-        print(result)
+        ext = _fmt_ext(fmt)
+        out_path = _safe_filename(sub_name, ext)
+
+    with open(out_path, "w") as f:
+        f.write(result)
+    print(f"✅ {len(nodes)} nodes «{sub_name or 'config'}» → {out_path}")
 
 
 def cmd_batch(args):
