@@ -15,6 +15,78 @@ class ParseError(Exception):
     pass
 
 
+# Known VLESS query parameter keys (whitelist)
+_VLESS_KNOWN_PARAMS = {
+    "encryption", "type", "security", "sni", "fp", "alpn",
+    "pbk", "sid", "spx", "flow", "host", "path", "packetEncoding",
+    "serviceName", "mode", "headerType",
+}
+
+# Known Trojan query parameter keys
+_TROJAN_KNOWN_PARAMS = {
+    "sni", "alpn", "type", "path", "host", "fp", "security",
+}
+
+# Known Hysteria2 query parameter keys
+_HYSTERIA2_KNOWN_PARAMS = {
+    "sni", "alpn", "obfs", "obfs-password", "insecure",
+}
+
+
+def _sanitize_value(val: str) -> str:
+    """Clean a single query param value from junk characters."""
+    # Remove Latin Extended spam chars (U+00C0-U+01FF) used as obfuscation
+    val = re.sub(r"[\u00C0-\u01FF]", "", val)
+    return val
+
+
+def _sanitize_params(qs: dict, known: set) -> dict:
+    """Remove unknown/malicious query params and clean known ones.
+
+    Input: parse_qs output {key: [val1, val2, ...]}
+    Output: same format {key: [val]} for compatibility with _get().
+    """
+    clean = {}
+    for k, v in qs.items():
+        if k not in known:
+            continue
+        val = v[0] if isinstance(v, list) else v
+        # Clean junk characters from value
+        val = _sanitize_value(val)
+        # Drop params with repeated/spam values (e.g. host=/?BIA_TELEGRAM@FOO_FOO_FOO)
+        if len(val) > 200:
+            continue
+        # Drop params with suspicious repeated patterns
+        if re.search(r"(.{5,})\1{3,}", val):
+            continue
+        # Drop params containing known spam tokens
+        lowered = val.lower()
+        if any(tok in lowered for tok in ("bia_telegram", "marambashi", "networld_vpn", "vpnserverrr", "you_are_beautiful")):
+            continue
+        clean[k] = [val]
+    return clean
+
+
+def _clean_name(name: str) -> str:
+    """Clean node name from mojibake and garbage."""
+    if not name:
+        return name
+    # Fix double-encoded UTF-8 (mojibake like ÃƒÂ)
+    try:
+        raw = name.encode("latin-1")
+        fixed = raw.decode("utf-8")
+        if any(ord(c) > 127 for c in fixed):
+            name = fixed
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        pass
+    # Remove Latin Extended spam chars (U+00C0-U+01FF) used as obfuscation
+    # e.g. ÃƒÂƒÃ (C3 192 C2 192 C3) — junk inserted by some VPN providers
+    name = re.sub(r"[\u00C0-\u01FF]", "", name)
+    # Remove non-printable chars except emoji/flags
+    name = re.sub(r"[^\x20-\x7E\u00A0-\uFFFF\u2600-\u27BF\U0001F000-\U0001FFFF]", "", name)
+    return name.strip()
+
+
 @dataclass
 class Node:
     protocol: str
@@ -170,6 +242,8 @@ def fix_link(link: str) -> str:
     - vless/trojan: adds ? before first & if no ? present
     - vless: adds type=tcp if missing (required by some clients like podkop)
     - vless: normalizes packet-encoding -> packetEncoding
+    - vless/trojan: removes known spam/malware query parameters
+    - vless: removes invalid transport types (e.g. type=raw -> type=tcp)
     """
     link = link.strip()
     if not link:
@@ -192,8 +266,59 @@ def fix_link(link: str) -> str:
             if remainder.startswith("&"):
                 remainder = "?" + remainder[1:]
 
+            # Clean query string: remove known spam params and fix values
+            if "?" in remainder:
+                q_start = remainder.find("?")
+                query_str = remainder[q_start + 1:]
+                frag = ""
+                if "#" in query_str:
+                    qi = query_str.find("#")
+                    frag = query_str[qi:]
+                    query_str = query_str[:qi]
+
+                # Parse and filter query params
+                params = []
+                for part in query_str.split("&"):
+                    if "=" not in part:
+                        continue
+                    k, v = part.split("=", 1)
+                    v_decoded = unquote(v)
+                    # Clean junk characters (Latin Extended spam)
+                    v_decoded = _sanitize_value(v_decoded)
+
+                    # Skip known spam params
+                    if k in ("seq", "scid", "sId"):
+                        continue
+
+                    # Skip params with repeated/spam values
+                    if re.search(r"(.{5,})\1{3,}", v_decoded):
+                        continue
+
+                    # Skip params containing known spam tokens
+                    v_lower = v_decoded.lower()
+                    if any(tok in v_lower for tok in (
+                        "bia_telegram", "marambashi", "networld_vpn",
+                        "vpnserverrr", "you_are_beautiful",
+                    )):
+                        continue
+
+                    # Skip params with excessively long values (>200 chars)
+                    if len(v_decoded) > 200:
+                        continue
+
+                    # Fix type=raw -> type=tcp
+                    if k == "type" and v_decoded not in ("tcp", "ws", "grpc", "h2", "quic", "xhttp"):
+                        v_decoded = "tcp"
+                        v = "tcp"
+
+                    params.append(f"{k}={v}")
+
+                remainder = "?" + "&".join(params) if params else ""
+                if frag:
+                    remainder += frag
+
             # vless: ensure type is present (check decoded full link)
-            if prefix == "vless://" and "type=" not in unquote(link[len(prefix):]):
+            if prefix == "vless://" and "type=" not in unquote(remainder):
                 hash_idx = remainder.find("#")
                 if hash_idx != -1:
                     remainder = remainder[:hash_idx] + "&type=tcp" + remainder[hash_idx:]
@@ -266,7 +391,7 @@ _UUID_RE = re.compile(
 def parse_vless(link: str) -> Node:
     link = link.strip()
     if not link.startswith("vless://"):
-        raise ParseError("Not a vLESS link")
+        raise ParseError("Not a VLESS link")
     link = fix_link(link)
     parsed = urlparse(link)
     if not parsed.hostname or not parsed.port:
@@ -274,13 +399,17 @@ def parse_vless(link: str) -> Node:
     uuid = parsed.username or ""
     if not uuid:
         raise ParseError("Missing UUID")
-    qs = parse_qs(parsed.query)
+    qs = _sanitize_params(parse_qs(parsed.query), _VLESS_KNOWN_PARAMS)
+    net = _get(qs, "type", "tcp")
+    # Reject invalid transport types — fallback to tcp
+    if net not in ("tcp", "ws", "grpc", "h2", "quic", "xhttp"):
+        net = "tcp"
     node = Node(
         protocol="vless",
         uuid=uuid,
         address=parsed.hostname,
         port=parsed.port,
-        net=_get(qs, "type", "tcp"),
+        net=net,
         path=unquote(_get(qs, "path")),
         host=_get(qs, "host"),
         tls=_get(qs, "security") in ("tls", "reality"),
@@ -293,7 +422,7 @@ def parse_vless(link: str) -> Node:
         flow=_get(qs, "flow"),
     )
     if parsed.fragment:
-        node.name = unquote(parsed.fragment)
+        node.name = _clean_name(unquote(parsed.fragment))
     return node
 
 
@@ -334,7 +463,7 @@ def parse_trojan(link: str) -> Node:
     parsed = urlparse(link)
     if not parsed.hostname or not parsed.port:
         raise ParseError("Missing host/port")
-    qs = parse_qs(parsed.query)
+    qs = _sanitize_params(parse_qs(parsed.query), _TROJAN_KNOWN_PARAMS)
     node = Node(
         protocol="trojan",
         trojan_password=unquote(parsed.username or ""),
@@ -348,7 +477,7 @@ def parse_trojan(link: str) -> Node:
         fp=_get(qs, "fp"),
     )
     if parsed.fragment:
-        node.name = unquote(parsed.fragment)
+        node.name = _clean_name(unquote(parsed.fragment))
     return node
 
 
@@ -428,14 +557,13 @@ def parse_ssr(link: str) -> Node:
 
 
 def parse_hysteria2(link: str) -> Node:
-    """Parse hysteria2:// link."""
     link = link.strip()
     if not link.startswith("hysteria2://"):
         raise ParseError("Not a Hysteria2 link")
     parsed = urlparse(link)
     if not parsed.hostname or not parsed.port:
         raise ParseError("Missing host/port")
-    qs = parse_qs(parsed.query)
+    qs = _sanitize_params(parse_qs(parsed.query), _HYSTERIA2_KNOWN_PARAMS)
     node = Node(
         protocol="hysteria2",
         address=parsed.hostname,
@@ -446,7 +574,7 @@ def parse_hysteria2(link: str) -> Node:
         obfs=_get(qs, "obfs"),
     )
     if parsed.fragment:
-        node.name = unquote(parsed.fragment)
+        node.name = _clean_name(unquote(parsed.fragment))
     return node
 
 
