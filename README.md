@@ -96,10 +96,18 @@ cli/             — CLI (typer)
 ## Core API highlights
 
 ### fix_link()
-Normalizes proxy links for compatibility (e.g. podkop):
+Нормализует прокси-ссылки для совместимости (например, podkop):
 - Converts `&` → `?` at query start
 - Adds `type=tcp` if missing (vless)
 - Normalizes `packet-encoding=` → `packetEncoding=`
+
+### Node validation
+`Node.validate()` checks required fields for each protocol (lightweight, no external deps):
+```python
+node = parse_link(link)
+node.validate()  # raises ParseError on critical issues
+```
+Called automatically in `parse_text_input()` and `iter_parse_text()`.
 
 ### Node round-trip
 Each protocol has a `to_*_link()` method for serialization:
@@ -113,6 +121,12 @@ For large inputs, use `iter_parse_text()` (generator) instead of `parse_text_inp
 
 ### Country extraction
 `extract_country(name)` detects country from flag emoji or text patterns in node names. Used by FlClash `group_by_country` to create per-country proxy groups.
+
+### Protocol adapters (converters)
+`converters.py` uses a ProtocolAdapter pattern (ABC) for format-specific generation:
+- `VLESSAdapter`, `VMessAdapter`, `TrojanAdapter`, `SSAdapter`, `Hysteria2Adapter`, `SSRAAdapter`
+- Each adapter implements `to_clash_dict()`, `to_mihomo_dict()`, `to_singbox_dict()`, `to_link()`
+- YAML output via PyYAML (no manual indentation)
 
 ## Settings
 

@@ -136,6 +136,38 @@ class Node:
     def display_name(self) -> str:
         return self.name or f"{self.protocol}://{self.address}:{self.port}"
 
+    def validate(self) -> bool:
+        """Validate node structure (lightweight, no external deps).
+
+        Raises ParseError if critical fields are missing or invalid.
+        """
+        if self.protocol not in ("vless", "vmess", "trojan", "ss", "ssr", "hysteria2", "socks"):
+            return True  # Skip validation for error/unknown nodes
+
+        if not self.address:
+            raise ParseError(f"Missing address for {self.protocol} node")
+        if not self.port or self.port < 1 or self.port > 65535:
+            raise ParseError(f"Invalid port {self.port} for {self.protocol} node")
+
+        # Protocol-specific required fields
+        if self.protocol == "vless" and not self.uuid:
+            raise ParseError("Missing UUID for VLESS node")
+        if self.protocol == "vmess" and not self.uuid:
+            raise ParseError("Missing UUID for VMess node")
+        if self.protocol == "trojan" and not self.trojan_password:
+            raise ParseError("Missing password for Trojan node")
+        if self.protocol == "ss" and (not self.ss_method or not self.ss_password):
+            raise ParseError("Missing method/password for SS node")
+        if self.protocol == "hysteria2" and not self.hysteria2_password:
+            raise ParseError("Missing password for Hysteria2 node")
+
+        # Validate network type
+        valid_nets = ("tcp", "ws", "grpc", "h2", "quic", "xhttp")
+        if self.net not in valid_nets:
+            self.net = "tcp"  # Auto-fix invalid transport
+
+        return True
+
     def to_vless_link(self) -> str:
         if self.protocol != "vless":
             raise ParseError(f"Cannot convert {self.protocol} to vless link")
@@ -637,7 +669,9 @@ def parse_text_input(text: str) -> list[Node]:
         # This catches cases where urlparse would fail on malformed ports
         line = fix_link(line)
         try:
-            nodes.append(parse_link(line))
+            node = parse_link(line)
+            node.validate()  # Lightweight validation (raises ParseError on critical issues)
+            nodes.append(node)
         except ParseError as e:
             nodes.append(Node(protocol="error", name=str(e), extra={"raw": line}))
     return nodes
@@ -653,7 +687,9 @@ def iter_parse_text(text: str):
         if not line or line.startswith("#"):
             continue
         try:
-            yield parse_link(line)
+            node = parse_link(line)
+            node.validate()
+            yield node
         except ParseError as e:
             yield Node(protocol="error", name=str(e), extra={"raw": line})
 

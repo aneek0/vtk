@@ -9,6 +9,7 @@ dependencies = [
     "orjson",
     "python-multipart>=0.0.32",
     "uvicorn>=0.48.0",
+    "pyyaml>=6.0",
 ]
 
 [build-system]

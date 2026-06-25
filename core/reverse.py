@@ -267,7 +267,7 @@ def _yaml_proxy_to_node(p: dict) -> Optional[Node]:
 def _singbox_outbound_to_node(o: dict) -> Optional[Node]:
     """Convert a sing-box or Xray outbound entry to Node."""
     proto = o.get("type", "") or o.get("protocol", "")
-    if not proto or proto in ("ssr", "selector", "urltest", "direct", "block", "dns"):
+    if not proto or proto in ("ssr", "selector", "urltest", "direct", "block", "dns", "freedom", "blackhole"):
         return None
 
     # Detect format: sing-box uses "server"/"server_port", Xray uses "settings.vnext"
@@ -324,6 +324,8 @@ def _singbox_outbound_to_node(o: dict) -> Optional[Node]:
 
 def _xray_outbound_to_node(o: dict, proto: str) -> Optional[Node]:
     """Convert Xray-format outbound to Node."""
+    if proto in ("freedom", "blackhole", "direct", "block", "dns"):
+        return None
     settings = o.get("settings", {})
     stream = o.get("streamSettings", {})
     tag = o.get("tag", "")
