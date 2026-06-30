@@ -513,11 +513,57 @@ def parse_trojan(link: str) -> Node:
     return node
 
 
+def _fix_ss_2022_key(method: str, password: str) -> str:
+    """Fix 2022-blake3 key length by truncating or zero-padding.
+
+    Some subscription providers generate wrong-length keys (e.g. 32 bytes
+    for 2022-blake3-aes-128-gcm which needs 16). This auto-corrects them
+    so the client doesn't crash with "bad key length".
+    """
+    import base64
+    expected = {
+        "2022-blake3-aes-128-gcm": 16,
+        "2022-blake3-aes-256-gcm": 32,
+        "2022-blake3-chacha20-poly1305": 32,
+    }
+    exp = expected.get(method)
+    if not exp:
+        return password
+
+    # Try to decode password as base64
+    try:
+        # Add padding if needed
+        padded = password + "=" * (-len(password) % 4)
+        key_bytes = base64.b64decode(padded)
+    except Exception:
+        # Not valid base64, return as-is
+        return password
+
+    if len(key_bytes) == exp:
+        return password  # Already correct
+
+    # Fix length: truncate or zero-pad
+    if len(key_bytes) > exp:
+        key_bytes = key_bytes[:exp]
+    else:
+        key_bytes = key_bytes + b"\x00" * (exp - len(key_bytes))
+
+    # Re-encode to base64 (standard, with padding)
+    return base64.b64encode(key_bytes).decode()
+
+
 def parse_ss(link: str) -> Node:
     """Parse ss:// link (SIP002 or legacy)."""
     link = link.strip()
     if not link.startswith("ss://"):
         raise ParseError("Not an SS link")
+
+    # Strip fragment early — emoji/non-ASCII in #fragment breaks urlparse
+    # and also gets included in link[5:] for base64 decode
+    fragment = ""
+    if "#" in link:
+        link, fragment = link.split("#", 1)
+
     parsed = urlparse(link)
     if parsed.hostname and parsed.port is not None:
         try:
@@ -527,7 +573,8 @@ def parse_ss(link: str) -> Node:
         if ":" not in decoded:
             raise ParseError("Invalid SS userinfo (expected method:password)")
         method, password = decoded.split(":", 1)
-        name = unquote(parsed.fragment) if parsed.fragment else ""
+        password = _fix_ss_2022_key(method, password)
+        name = unquote(fragment) if fragment else ""
         return Node(
             protocol="ss",
             address=parsed.hostname,
@@ -545,12 +592,15 @@ def parse_ss(link: str) -> Node:
         m = re.match(r"^(.+?):(.+?)@(.+?):(\d+)", decoded)
         if not m:
             raise ParseError(f"Cannot parse legacy SS: {decoded}")
+        method = m.group(1)
+        password = _fix_ss_2022_key(method, m.group(2))
         return Node(
             protocol="ss",
             address=m.group(3),
             port=int(m.group(4)),
-            ss_method=m.group(1),
-            ss_password=m.group(2),
+            ss_method=method,
+            ss_password=password,
+            name=unquote(fragment) if fragment else "",
         )
 
 
@@ -709,13 +759,12 @@ _UA_LIST = [
 
 
 async def fetch_subscription(url: str, timeout: int = 15) -> str:
-    """Fetch subscription content from URL via Happy Decoder Universal Proxy.
-
-    Uses https://happy-decoder.cc/p/<url> — handles HWID, device emulation,
-    and happ:// decryption automatically.
-    """
-    from core.happ import fetch_sub_with_decrypt
-    return await fetch_sub_with_decrypt(url, timeout=timeout)
+    """Fetch subscription content from URL directly (no external API)."""
+    import httpx
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        return resp.text
 
 
 def extract_subscription_name(url: str, content: str, resp_headers: dict | None = None) -> str:

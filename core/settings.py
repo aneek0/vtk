@@ -26,6 +26,9 @@ class Settings:
     config_format: Format = Format.TXT      # JSON/YAML config → this format
     txt_format: Format = Format.MIHOMO      # txt file with links → this format
 
+    # Web UI default format
+    web_default_format: Format = Format.SINGBOX  # used in HTML form default selection
+
     # Tag prefix for generated configs
     tag_prefix: str = ""
 
@@ -68,7 +71,7 @@ def save_settings(settings: Settings, path: str = "") -> None:
     f = Path(path)
     f.parent.mkdir(parents=True, exist_ok=True)
     data = {}
-    for key in ("sub_format", "link_format", "config_format", "txt_format"):
+    for key in ("sub_format", "link_format", "config_format", "txt_format", "web_default_format"):
         val = getattr(settings, key)
         data[key] = val.value if isinstance(val, Format) else val
     data["tag_prefix"] = settings.tag_prefix

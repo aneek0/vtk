@@ -294,17 +294,20 @@ def _singbox_outbound_to_node(o: dict) -> Optional[Node]:
             node.path = transport.get("service_name", "")
 
     tls = o.get("tls", {})
-    if tls and tls.get("enabled"):
-        node.tls = True
-        node.sni = tls.get("server_name", "")
-        node.alpn = ",".join(tls.get("alpn", [])) if isinstance(tls.get("alpn"), list) else tls.get("alpn", "")
-        utls = tls.get("utls", {})
-        if utls:
-            node.fp = utls.get("fingerprint", "")
-        reality = tls.get("reality", {})
-        if reality:
-            node.reality_pbk = reality.get("public_key", "")
-            node.reality_sid = reality.get("short_id", "")
+    if tls:
+        if isinstance(tls, bool):
+            node.tls = True
+        elif isinstance(tls, dict) and tls.get("enabled"):
+            node.tls = True
+            node.sni = tls.get("server_name", "")
+            node.alpn = ",".join(tls.get("alpn", [])) if isinstance(tls.get("alpn"), list) else tls.get("alpn", "")
+            utls = tls.get("utls", {})
+            if utls:
+                node.fp = utls.get("fingerprint", "")
+            reality = tls.get("reality", {})
+            if reality:
+                node.reality_pbk = reality.get("public_key", "")
+                node.reality_sid = reality.get("short_id", "")
 
     if proto == "vless":
         node.uuid = o.get("uuid", "")

@@ -10,6 +10,8 @@ dependencies = [
     "python-multipart>=0.0.32",
     "uvicorn>=0.48.0",
     "pyyaml>=6.0",
+    "pycryptodome>=3.23.0",
+    "cryptography>=49.0.0",
 ]
 
 [build-system]

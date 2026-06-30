@@ -374,9 +374,10 @@ def _fill_clash_tls(obj: dict, node: Node):
         if node.fp:
             obj["client-fingerprint"] = node.fp
         if node.reality_pbk:
-            obj["reality-opts"] = {"public-key": node.reality_pbk}
-            if node.reality_sid:
-                obj["reality-opts"]["short-id"] = node.reality_sid
+            obj["reality-opts"] = {
+                "public-key": node.reality_pbk,
+                "short-id": node.reality_sid or "00000000",
+            }
 
 
 def _fill_singbox_transport(obj: dict, node: Node):
@@ -407,7 +408,7 @@ def _fill_singbox_tls(obj: dict, node: Node):
             tls["reality"] = {
                 "enabled": True,
                 "public_key": node.reality_pbk,
-                "short_id": node.reality_sid or "",
+                "short_id": node.reality_sid or "00000000",
             }
         obj["tls"] = tls
 
@@ -464,34 +465,76 @@ def to_singbox(nodes: list[Node], tag_prefix: str = "") -> str:
 # mihomo (Clash Meta) YAML
 # ---------------------------------------------------------------------------
 
-def to_mihomo(nodes: list[Node], tag_prefix: str = "") -> str:
+def to_mihomo(nodes: list[Node], tag_prefix: str = "", bare: bool = True) -> str:
+    """Generate mihomo YAML (proxies only by default).
+
+    Args:
+        nodes: parsed proxy nodes
+        tag_prefix: prefix for auto-generated names
+        bare: if True (default), output only proxies without proxy-groups/rules
+    """
     if not _HAS_YAML:
         raise ImportError("PyYAML is required for mihomo format")
 
+    names = []
     proxy_dicts = []
     for i, node in enumerate(nodes):
         if node.protocol == "ssr":
             continue
         obj = _node_to_dict(node, "mihomo")
-        if obj:
-            proxy_dicts.append(obj)
+        if not obj:
+            continue
+        names.append(obj["name"])
+        proxy_dicts.append(obj)
 
     if not proxy_dicts:
         raise ParseError("No convertible nodes")
 
-    config = {"proxies": proxy_dicts}
+    if bare:
+        config = {"proxies": proxy_dicts}
+    else:
+        groups = _build_proxy_groups(names)
+        config = {
+            "proxies": proxy_dicts,
+            "proxy-groups": groups,
+        }
     return _yaml.dump(config, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+
+def _build_proxy_groups(names: list[str]) -> list[dict]:
+    """Build proxy-groups for mihomo format.
+
+    Uses native YAML arrays for proxies (not JSON-embedded strings).
+    """
+    groups = []
+    groups.append({
+        "name": "Quattro VPN",
+        "type": "select",
+        "proxies": list(names),
+    })
+    groups.append({
+        "name": "Auto",
+        "type": "url-test",
+        "url": "http://www.gstatic.com/generate_204",
+        "interval": 300,
+        "tolerance": 50,
+        "proxies": list(names),
+    })
+    return groups
 
 
 # ---------------------------------------------------------------------------
 # FlClash YAML — full mihomo config with proxy-groups and rules
 # ---------------------------------------------------------------------------
 
-def to_flclash(nodes: list[Node], tag_prefix: str = "", group_by_country: bool = False) -> str:
+def to_flclash(nodes: list[Node], tag_prefix: str = "", group_by_country: bool = False, bare: bool = False) -> str:
     """Generate a complete FlClash/mihomo config file.
 
     Uses dict-based approach (like sunway910/clashconverter) to avoid
     YAML indentation/escaping issues with special characters.
+
+    Args:
+        bare: if True, output only proxies (no proxy-groups, rules, dns, etc.)
     """
     if not _HAS_YAML:
         raise ImportError("PyYAML is required for flclash format")
@@ -513,24 +556,41 @@ def to_flclash(nodes: list[Node], tag_prefix: str = "", group_by_country: bool =
         "fake-ip-filter": ["*.lan"],
     }
 
-    # Build proxy dicts
+    # Build proxy dicts with auto-dedup names
     proxy_dicts = []
-    names = []
-    country_groups: dict[str, list[str]] = defaultdict(list)
+    names: list[str] = []
+    seen_names: dict[str, int] = {}
 
-    for i, node in enumerate(nodes):
+    for node in nodes:
         if node.protocol == "ssr":
             continue
         obj = _node_to_dict(node, "clash")
         if not obj:
             continue
-        name = obj["name"]
-        names.append(name)
-        country_groups[extract_country(name)].append(name)
+        original_name = obj.get("name", "")
+        if not original_name:
+            original_name = f"{node.protocol}-{node.port}"
+        if original_name in seen_names:
+            seen_names[original_name] += 1
+            obj["name"] = f"{original_name}-{seen_names[original_name]}"
+        else:
+            seen_names[original_name] = 0
+            obj["name"] = original_name
+        names.append(obj["name"])
         proxy_dicts.append(obj)
+
+    # Build country groups from deduped names
+    country_groups: dict[str, list[str]] = defaultdict(list)
+    for name in names:
+        country_groups[extract_country(name)].append(name)
+
+    # Keep display-friendly mantras: _ → ) etc. — actual proxy names in YAML
 
     if not proxy_dicts:
         raise ParseError("No convertible nodes")
+
+    if bare:
+        return _yaml.dump({"proxies": proxy_dicts}, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
     # Build proxy groups
     proxy_groups = []
@@ -543,19 +603,19 @@ def to_flclash(nodes: list[Node], tag_prefix: str = "", group_by_country: bool =
     }
 
     if group_by_country and len(country_groups) > 1:
-        main_group["proxies"] = [_yaml_escape(n) for n in names]
+        main_group["proxies"] = list(names)
         for country in sorted(country_groups.keys()):
-            main_group["proxies"].append(_yaml_escape(country))
+            main_group["proxies"].append(country)
         proxy_groups.append(main_group)
 
         for country, cnames in sorted(country_groups.items()):
             proxy_groups.append({
                 "name": country,
                 "type": "select",
-                "proxies": [_yaml_escape(cn) for cn in cnames],
+                "proxies": list(cnames),
             })
     else:
-        main_group["proxies"] = [_yaml_escape(n) for n in names]
+        main_group["proxies"] = list(names)
         proxy_groups.append(main_group)
 
     # Auto url-test group
@@ -565,7 +625,7 @@ def to_flclash(nodes: list[Node], tag_prefix: str = "", group_by_country: bool =
         "url": "http://www.gstatic.com/generate_204",
         "interval": 300,
         "tolerance": 50,
-        "proxies": [_yaml_escape(n) for n in names],
+        "proxies": list(names),
     })
 
     # Assemble full config
@@ -794,16 +854,28 @@ def _build_xray_stream(node: Node) -> dict:
     """Build Xray streamSettings for a node."""
     stream: dict = {"network": node.net if node.net != "tcp" else "tcp"}
 
-    if node.tls:
-        stream["security"] = "tls"
-        tls_settings: dict = {}
-        if node.sni:
-            tls_settings["serverName"] = node.sni
-        if node.fp:
-            tls_settings["fingerprint"] = node.fp
-        if node.alpn:
-            tls_settings["alpn"] = node.alpn.split(",")
-        stream["tlsSettings"] = tls_settings
+    if node.tls or node.reality_pbk:
+        if node.reality_pbk:
+            stream["security"] = "reality"
+            reality_settings: dict = {}
+            if node.sni:
+                reality_settings["serverName"] = node.sni
+            if node.fp:
+                reality_settings["fingerprint"] = node.fp
+            reality_settings["publicKey"] = node.reality_pbk
+            if node.reality_sid:
+                reality_settings["shortId"] = node.reality_sid
+            stream["realitySettings"] = reality_settings
+        else:
+            stream["security"] = "tls"
+            tls_settings: dict = {}
+            if node.sni:
+                tls_settings["serverName"] = node.sni
+            if node.fp:
+                tls_settings["fingerprint"] = node.fp
+            if node.alpn:
+                tls_settings["alpn"] = node.alpn.split(",")
+            stream["tlsSettings"] = tls_settings
 
     if node.net == "ws":
         ws_settings: dict = {}
@@ -847,6 +919,7 @@ def convert(
     fmt: Format,
     tag_prefix: str = "",
     group_by_country: bool = False,
+    bare: bool = False,
 ) -> str:
     """Convert nodes to the specified format.
 
@@ -855,6 +928,7 @@ def convert(
         fmt: Target format
         tag_prefix: Prefix for auto-generated names
         group_by_country: Whether to group proxies by country (flclash only)
+        bare: If True, output only proxies (no proxy-groups, rules, dns)
 
     Returns:
         Formatted string ready for use
@@ -862,9 +936,9 @@ def convert(
     if fmt == Format.SINGBOX:
         return to_singbox(nodes, tag_prefix)
     elif fmt == Format.MIHOMO:
-        return to_mihomo(nodes, tag_prefix)
+        return to_mihomo(nodes, tag_prefix, bare=bare)
     elif fmt == Format.FLCLASH:
-        return to_flclash(nodes, tag_prefix, group_by_country)
+        return to_flclash(nodes, tag_prefix, group_by_country, bare=bare)
     elif fmt == Format.TXT:
         return to_txt(nodes, tag_prefix)
     elif fmt == Format.XRAY:
