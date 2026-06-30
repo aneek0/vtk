@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `62d46347`
+- Built from commit: `877b9166`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -94,27 +94,27 @@ Nodes (16): CLI, VLESS Toolkit (vtk), Бот, Быстрый старт, Веб,
 
 ### Community 7 - "Community 7"
 Cohesion: 0.17
-Nodes (8): _base_clash_dict(), _fill_clash_tls(), Hysteria2Adapter, Node, Base dict with common Clash fields., Add TLS/reality options to a Clash proxy dict., Convert node to Clash/mihomo dict format., SSAdapter
+Nodes (14): _build_xray_stream(), get_adapter(), _json_dumps(), _json_loads(), _node_to_xray_outbound(), Converters: sing-box JSON, mihomo YAML, FlClash YAML, plain txt.  Architecture (, Register all protocol adapters., Get adapter for a protocol type. (+6 more)
 
 ### Community 8 - "Community 8"
-Cohesion: 0.17
-Nodes (14): _build_xray_stream(), get_adapter(), _json_dumps(), _json_loads(), _node_to_xray_outbound(), Converters: sing-box JSON, mihomo YAML, FlClash YAML, plain txt.  Architecture (, Register all protocol adapters., Get adapter for a protocol type. (+6 more)
+Cohesion: 0.20
+Nodes (6): _base_clash_dict(), Hysteria2Adapter, Node, Base dict with common Clash fields., Convert node to Clash/mihomo dict format., SSAdapter
 
 ### Community 9 - "Community 9"
 Cohesion: 0.24
 Nodes (5): fix_link(), Normalize a proxy link to standard format.      Fixes:     - vless/trojan: adds, Clean a single query param value from junk characters., _sanitize_value(), TestFixLink
 
 ### Community 10 - "Community 10"
-Cohesion: 0.20
-Nodes (6): ABC, ProtocolAdapter, Base adapter — each protocol implements format-specific generation., Convert node to sing-box dict format., Convert node back to share link., VLESSAdapter
+Cohesion: 0.18
+Nodes (9): _build_proxy_groups(), _node_to_dict(), Universal node-to-dispenser: calls the right adapter for the format.      Args:, Generate mihomo YAML (proxies only by default).      Args:         nodes: parsed, Build proxy-groups for mihomo format.      Uses native YAML arrays for proxies (, Generate a complete FlClash/mihomo config file.      Uses dict-based approach (l, SSRAdapter, to_flclash() (+1 more)
 
 ### Community 11 - "Community 11"
 Cohesion: 0.20
-Nodes (4): _fill_clash_transport(), Add transport options to a Clash proxy dict., TrojanAdapter, VMessAdapter
+Nodes (6): ABC, ProtocolAdapter, Base adapter — each protocol implements format-specific generation., Convert node to mihomo-specific dict format., Convert node to sing-box dict format., Convert node back to share link.
 
 ### Community 12 - "Community 12"
-Cohesion: 0.22
-Nodes (6): _node_to_dict(), Universal node-to-dispenser: calls the right adapter for the format.      Args:, Generate a complete FlClash/mihomo config file.      Uses dict-based approach (l, Convert node to mihomo-specific dict format., SSRAdapter, to_flclash()
+Cohesion: 0.20
+Nodes (4): _fill_clash_transport(), Add transport options to a Clash proxy dict., TrojanAdapter, VMessAdapter
 
 ### Community 13 - "Community 13"
 Cohesion: 0.28
@@ -125,8 +125,8 @@ Cohesion: 0.40
 Nodes (5): cmd_extract(), Generate a list of share links (one per node)., to_txt(), api_extract(), Extract share links from a config.
 
 ### Community 15 - "Community 15"
-Cohesion: 0.50
-Nodes (4): _build_proxy_groups(), Generate mihomo YAML (proxies only by default).      Args:         nodes: parsed, Build proxy-groups for mihomo format.      Uses native YAML arrays for proxies (, to_mihomo()
+Cohesion: 0.40
+Nodes (3): _fill_clash_tls(), Add TLS/reality options to a Clash proxy dict., VLESSAdapter
 
 ## Knowledge Gaps
 - **28 isolated node(s):** `vtk`, `Что это`, `Поддерживаемые протоколы`, `Форматы вывода`, `Переменные окружения` (+23 more)
@@ -140,7 +140,7 @@ _Questions this graph is uniquely positioned to answer:_
   _High betweenness centrality (0.165) - this node is a cross-community bridge._
 - **Why does `_load_crypt5_keys()` connect `Community 3` to `Community 2`?**
   _High betweenness centrality (0.081) - this node is a cross-community bridge._
-- **Why does `Node` connect `Community 7` to `Community 0`, `Community 4`, `Community 8`, `Community 10`, `Community 11`, `Community 12`, `Community 13`, `Community 14`, `Community 15`, `Community 16`?**
+- **Why does `Node` connect `Community 8` to `Community 0`, `Community 4`, `Community 7`, `Community 10`, `Community 11`, `Community 12`, `Community 13`, `Community 14`, `Community 15`, `Community 16`?**
   _High betweenness centrality (0.075) - this node is a cross-community bridge._
 - **Are the 30 inferred relationships involving `ParseError` (e.g. with `Bot` and `Format`) actually correct?**
   _`ParseError` has 30 INFERRED edges - model-reasoned connections that need verification._
