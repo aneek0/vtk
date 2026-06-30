@@ -252,7 +252,7 @@ button.btn-rnd:hover{background:rgba(139,184,82,0.22)}
     &nbsp;&nbsp;-H "Content-Type: application/json" <br>
     &nbsp;&nbsp;-d '{"url":"happ://crypt5/..."}'
   </div>
-  <button class="copy-btn" style="margin:0.3rem 0 0.8rem" onclick="navigator.clipboard.writeText('curl -X POST http://127.0.0.1:9000/api/v1/decrypt -H &quot;Authorization: Bearer hd_demo_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6&quot; -H &quot;Content-Type: application/json&quot; -d &quot;{\&quot;url\&quot;:\&quot;happ://crypt5/...\&quot;}&quot;')">COPY</button>
+  <button class="copy-btn" style="margin:0.3rem 0 0.8rem" onclick="navigator.clipboard.writeText('curl -X POST http://127.0.0.1:9000/api/v1/decrypt -H &quot;Authorization: Bearer hd_demo_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6&quot; -H &quot;Content-Type: application/json&quot; -d &quot;{&quot;url&quot;:&quot;happ://crypt5/...&quot;}&quot;')">COPY</button>
 
   <label>Endpoints</label>
   <div style="font-size:0.72rem;color:var(--muted);line-height:2">
@@ -382,16 +382,16 @@ async function proxyFetch() {
   var paramsStr = parts.join(',');
   var fullUrl = host + '/p/' + paramsStr + '/' + url;
   if (format !== 'as_is') fullUrl += '?format=' + format;
-  var urlHtml = '<label>URL for app<\/label><div class="url-box"><a href="' + fullUrl + '" target="_blank">' + fullUrl + '<\/a><\/div>';
+  var urlHtml = '<label>URL for app<\\/label><div class="url-box"><a href="' + fullUrl + '" target="_blank">' + fullUrl + '<\\/a><\\/div>';
   urlHtml += `<button class=\"copy-btn\" onclick=\"navigator.clipboard.writeText('${fullUrl}')\">COPY</button>`;
-  urlHtml += '<a href="' + fullUrl + '" target="_blank"><button class="copy-btn">OPEN<\/button><\/a>';
+  urlHtml += '<a href="' + fullUrl + '" target="_blank"><button class="copy-btn">OPEN<\\/button><\\/a>';
   showResult('proxyResult', urlHtml, true, true);
   try {
     var r = await fetch('/p/' + paramsStr + '/' + url + (format !== 'as_is' ? '?format=' + format : ''));
     var text = await r.text();
     if (text.length > 0) {
-      var preview = '<div class="preview"><strong>Preview:<\/strong><br>' +
-        text.substring(0, 800) + (text.length > 800 ? '... (' + text.length + ' bytes)' : '') + '<\/div>';
+      var preview = '<div class="preview"><strong>Preview:<\\/strong><br>' +
+        text.substring(0, 800) + (text.length > 800 ? '... (' + text.length + ' bytes)' : '') + '<\\/div>';
       document.getElementById('proxyResultContent').innerHTML += preview;
     }
   } catch (e) { /* ignore */ }
