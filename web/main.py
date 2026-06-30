@@ -247,9 +247,9 @@ button.btn-rnd:hover{background:rgba(139,184,82,0.22)}
 
   <label style="margin-top:1rem">Quick Start</label>
   <div class="url-box" style="font-size:0.72rem">
-    curl -X POST http://127.0.0.1:9000/api/v1/decrypt \<br>
-    &nbsp;&nbsp;-H "Authorization: Bearer hd_demo_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6" \<br>
-    &nbsp;&nbsp;-H "Content-Type: application/json" \<br>
+    curl -X POST http://127.0.0.1:9000/api/v1/decrypt <br>
+    &nbsp;&nbsp;-H "Authorization: Bearer hd_demo_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6" <br>
+    &nbsp;&nbsp;-H "Content-Type: application/json" <br>
     &nbsp;&nbsp;-d '{"url":"happ://crypt5/..."}'
   </div>
   <button class="copy-btn" style="margin:0.3rem 0 0.8rem" onclick="navigator.clipboard.writeText('curl -X POST http://127.0.0.1:9000/api/v1/decrypt -H &quot;Authorization: Bearer hd_demo_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6&quot; -H &quot;Content-Type: application/json&quot; -d &quot;{\&quot;url\&quot;:\&quot;happ://crypt5/...\&quot;}&quot;')">COPY</button>
