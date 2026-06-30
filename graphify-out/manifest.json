@@ -1,112 +1,112 @@
 {
-  "/root/vtk/bot/__init__.py": {
+  "bot/__init__.py": {
     "mtime": 1779971529.9273334,
     "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
-    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+    "semantic_hash": ""
   },
-  "/root/vtk/bot/main.py": {
+  "bot/main.py": {
     "mtime": 1780655195.6917813,
     "ast_hash": "7d065bcfd853799aed1477267f6eb331",
-    "semantic_hash": "7d065bcfd853799aed1477267f6eb331"
+    "semantic_hash": ""
   },
-  "/root/vtk/cli/__init__.py": {
+  "cli/__init__.py": {
     "mtime": 1779971529.921384,
     "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
-    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+    "semantic_hash": ""
   },
-  "/root/vtk/cli/__main__.py": {
+  "cli/__main__.py": {
     "mtime": 1779997394.1264393,
     "ast_hash": "c9023ce4ba1aa4d31476dcc67192efa3",
-    "semantic_hash": "c9023ce4ba1aa4d31476dcc67192efa3"
+    "semantic_hash": ""
   },
-  "/root/vtk/cli/main.py": {
+  "cli/main.py": {
     "mtime": 1780675442.5178788,
     "ast_hash": "29518e56fb0d610b2e9e2a98d62c5c73",
-    "semantic_hash": "29518e56fb0d610b2e9e2a98d62c5c73"
+    "semantic_hash": ""
   },
-  "/root/vtk/core/__init__.py": {
+  "core/__init__.py": {
     "mtime": 1779917181.7714875,
     "ast_hash": "aeab3e47f3f38b8bafa0dd7915bd0560",
-    "semantic_hash": "aeab3e47f3f38b8bafa0dd7915bd0560"
+    "semantic_hash": ""
   },
-  "/root/vtk/core/converters.py": {
-    "mtime": 1782713745.4911811,
-    "ast_hash": "6468a0d1943682538b8065fb7909bb39",
-    "semantic_hash": "6468a0d1943682538b8065fb7909bb39"
+  "core/converters.py": {
+    "mtime": 1782827751.8962803,
+    "ast_hash": "c0b53581294d6f7f1dd475d04e225ebd",
+    "semantic_hash": ""
   },
-  "/root/vtk/core/happ.py": {
-    "mtime": 1782675778.0721483,
-    "ast_hash": "050d6b6b3f64d7395ee134189fe64ee3",
-    "semantic_hash": "050d6b6b3f64d7395ee134189fe64ee3"
+  "core/happ.py": {
+    "mtime": 1782715196.9761825,
+    "ast_hash": "095acab7d08418c07fd738cc287c0c6b",
+    "semantic_hash": ""
   },
-  "/root/vtk/core/happdecrypt.py": {
+  "core/happdecrypt.py": {
     "mtime": 1782500169.6809957,
     "ast_hash": "5822d6fd23a24bd53ae060eadf9bcfea",
-    "semantic_hash": "5822d6fd23a24bd53ae060eadf9bcfea"
+    "semantic_hash": ""
   },
-  "/root/vtk/core/logic.py": {
-    "mtime": 1782305736.4148269,
-    "ast_hash": "4ee7291b0d1e20787048a4ad7145645d",
-    "semantic_hash": "4ee7291b0d1e20787048a4ad7145645d"
+  "core/logic.py": {
+    "mtime": 1782839367.9342904,
+    "ast_hash": "16240a5bf71f1d14878a08ace47d0db3",
+    "semantic_hash": ""
   },
-  "/root/vtk/core/reverse.py": {
+  "core/reverse.py": {
     "mtime": 1782634384.8811123,
     "ast_hash": "5f7b5c199d93109ff5276ce45ef9d0bd",
-    "semantic_hash": "5f7b5c199d93109ff5276ce45ef9d0bd"
+    "semantic_hash": ""
   },
-  "/root/vtk/core/settings.py": {
+  "core/settings.py": {
     "mtime": 1782501951.6149971,
     "ast_hash": "4d55d9b001679ab3db895d92607d6fb7",
-    "semantic_hash": "4d55d9b001679ab3db895d92607d6fb7"
+    "semantic_hash": ""
   },
-  "/root/vtk/data/crypt5_keys.json": {
+  "data/crypt5_keys.json": {
     "mtime": 1782500178.7431593,
     "ast_hash": "4dd81c9e4697a80ac34c8bc0a4474c02",
-    "semantic_hash": "4dd81c9e4697a80ac34c8bc0a4474c02"
+    "semantic_hash": ""
   },
-  "/root/vtk/pyproject.toml": {
+  "pyproject.toml": {
     "mtime": 1782500337.388996,
     "ast_hash": "aaa2662cf982fba4ab5210c191b395d8",
-    "semantic_hash": "aaa2662cf982fba4ab5210c191b395d8"
+    "semantic_hash": ""
   },
-  "/root/vtk/tests/conftest.py": {
+  "tests/conftest.py": {
     "mtime": 1779997097.8386312,
     "ast_hash": "8ab9a5c1f3bd804ec7562eab353769d7",
-    "semantic_hash": "8ab9a5c1f3bd804ec7562eab353769d7"
+    "semantic_hash": ""
   },
-  "/root/vtk/tests/test_logic.py": {
+  "tests/test_logic.py": {
     "mtime": 1780090945.8972528,
     "ast_hash": "0aac8ee95d0faa2a73153a6e7b3d7628",
-    "semantic_hash": "0aac8ee95d0faa2a73153a6e7b3d7628"
+    "semantic_hash": ""
   },
-  "/root/vtk/vtk_pkg/__init__.py": {
+  "vtk_pkg/__init__.py": {
     "mtime": 1779917181.7764876,
     "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
-    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+    "semantic_hash": ""
   },
-  "/root/vtk/web/__init__.py": {
+  "web/__init__.py": {
     "mtime": 1779971529.9332786,
     "ast_hash": "d41d8cd98f00b204e9800998ecf8427e",
-    "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
+    "semantic_hash": ""
   },
-  "/root/vtk/web/main.py": {
-    "mtime": 1782710664.4251785,
-    "ast_hash": "98afe66e7caf471e996967a59e0cca8f",
-    "semantic_hash": "98afe66e7caf471e996967a59e0cca8f"
+  "web/main.py": {
+    "mtime": 1782827346.3212798,
+    "ast_hash": "2637c13bfbf9a02965632c60ad62f83e",
+    "semantic_hash": ""
   },
-  "/root/vtk/AGENTS.md": {
+  "AGENTS.md": {
     "mtime": 1780047391.7630165,
     "ast_hash": "e664ac4897895b1303d66ca981d4cb67",
-    "semantic_hash": "e664ac4897895b1303d66ca981d4cb67"
+    "semantic_hash": ""
   },
-  "/root/vtk/README.md": {
+  "README.md": {
     "mtime": 1782374759.4218867,
     "ast_hash": "3ea2811a1db6f2ba7a7782ca3aea16c9",
-    "semantic_hash": "3ea2811a1db6f2ba7a7782ca3aea16c9"
+    "semantic_hash": ""
   },
-  "/root/vtk/requirements.txt": {
+  "requirements.txt": {
     "mtime": 1779997190.7355118,
     "ast_hash": "ef632dad8d33ccb950d89de7e7b5e3ae",
-    "semantic_hash": "ef632dad8d33ccb950d89de7e7b5e3ae"
+    "semantic_hash": ""
   }
 }
