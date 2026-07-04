@@ -465,14 +465,8 @@ def to_singbox(nodes: list[Node], tag_prefix: str = "") -> str:
 # mihomo (Clash Meta) YAML
 # ---------------------------------------------------------------------------
 
-def to_mihomo(nodes: list[Node], tag_prefix: str = "", bare: bool = True) -> str:
-    """Generate mihomo YAML (proxies only by default).
-
-    Args:
-        nodes: parsed proxy nodes
-        tag_prefix: prefix for auto-generated names
-        bare: if True (default), output only proxies without proxy-groups/rules
-    """
+def to_mihomo(nodes: list[Node], tag_prefix: str = "") -> str:
+    """Generate mihomo YAML (proxies only)."""
     if not _HAS_YAML:
         raise ImportError("PyYAML is required for mihomo format")
 
@@ -490,73 +484,25 @@ def to_mihomo(nodes: list[Node], tag_prefix: str = "", bare: bool = True) -> str
     if not proxy_dicts:
         raise ParseError("No convertible nodes")
 
-    if bare:
-        config = {"proxies": proxy_dicts}
-    else:
-        groups = _build_proxy_groups(names)
-        config = {
-            "proxies": proxy_dicts,
-            "proxy-groups": groups,
-        }
+    config = {"proxies": proxy_dicts}
     return _yaml.dump(config, default_flow_style=False, allow_unicode=True, sort_keys=False)
 
 
-def _build_proxy_groups(names: list[str]) -> list[dict]:
-    """Build proxy-groups for mihomo format.
-
-    Uses native YAML arrays for proxies (not JSON-embedded strings).
-    """
-    groups = []
-    groups.append({
-        "name": "Quattro VPN",
-        "type": "select",
-        "proxies": list(names),
-    })
-    groups.append({
-        "name": "Auto",
-        "type": "url-test",
-        "url": "http://www.gstatic.com/generate_204",
-        "interval": 300,
-        "tolerance": 50,
-        "proxies": list(names),
-    })
-    return groups
-
-
 # ---------------------------------------------------------------------------
-# FlClash YAML — full mihomo config with proxy-groups and rules
+# FlClash YAML — full config with proxy-groups, rules, and optional country groups
 # ---------------------------------------------------------------------------
 
-def to_flclash(nodes: list[Node], tag_prefix: str = "", group_by_country: bool = False, bare: bool = False) -> str:
-    """Generate a complete FlClash/mihomo config file.
-
-    Uses dict-based approach (like sunway910/clashconverter) to avoid
-    YAML indentation/escaping issues with special characters.
+def to_flclash(nodes: list[Node], tag_prefix: str = "", group_by_country: bool = False) -> str:
+    """Generate FlClash YAML with proxies, proxy-groups, and rules.
 
     Args:
-        bare: if True, output only proxies (no proxy-groups, rules, dns, etc.)
+        nodes: List of parsed Node objects
+        tag_prefix: Prefix for auto-generated names
+        group_by_country: Create per-country proxy groups (from node name emoji)
     """
     if not _HAS_YAML:
         raise ImportError("PyYAML is required for flclash format")
 
-    # DNS configuration
-    dns_config = {
-        "enable": True,
-        "use-hosts": True,
-        "enhanced-mode": "fake-ip",
-        "fake-ip-range": "198.18.0.1/16",
-        "default-nameserver": [
-            "https://8.8.8.8/dns-query",
-            "https://1.1.1.1/dns-query",
-        ],
-        "nameserver": [
-            "https://8.8.8.8/dns-query",
-            "https://1.1.1.1/dns-query",
-        ],
-        "fake-ip-filter": ["*.lan"],
-    }
-
-    # Build proxy dicts with auto-dedup names
     proxy_dicts = []
     names: list[str] = []
     seen_names: dict[str, int] = {}
@@ -579,56 +525,61 @@ def to_flclash(nodes: list[Node], tag_prefix: str = "", group_by_country: bool =
         names.append(obj["name"])
         proxy_dicts.append(obj)
 
-    # Build country groups from deduped names
-    country_groups: dict[str, list[str]] = defaultdict(list)
-    for name in names:
-        country_groups[extract_country(name)].append(name)
-
-    # Keep display-friendly mantras: _ → ) etc. — actual proxy names in YAML
-
     if not proxy_dicts:
         raise ParseError("No convertible nodes")
 
-    if bare:
-        return _yaml.dump({"proxies": proxy_dicts}, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    # Build proxy-groups
+    proxy_groups: list[dict] = []
 
-    # Build proxy groups
-    proxy_groups = []
+    if group_by_country:
+        # Group proxies by detected country
+        country_map: dict[str, list[str]] = {}
+        for name in names:
+            country = extract_country(name)
+            country_map.setdefault(country, []).append(name)
 
-    # Main select group
-    main_group = {
-        "name": "Quattro VPN",
-        "type": "select",
-        "proxies": [],
-    }
-
-    if group_by_country and len(country_groups) > 1:
-        main_group["proxies"] = list(names)
-        for country in sorted(country_groups.keys()):
-            main_group["proxies"].append(country)
-        proxy_groups.append(main_group)
-
-        for country, cnames in sorted(country_groups.items()):
+        # Country groups first (sorted)
+        all_countries = sorted(country_map.keys())
+        for country in all_countries:
+            group_name = f"🌍 {country}" if country else "🌍 Other"
             proxy_groups.append({
-                "name": country,
-                "type": "select",
-                "proxies": list(cnames),
+                "name": group_name,
+                "type": "url-test",
+                "proxies": country_map[country],
+                "url": "http://www.gstatic.com/generate_204",
+                "interval": 300,
             })
+
+        # Main SELECT group with countries + all proxies + DIRECT
+        select_proxies = ["DIRECT", "REJECT"]
+        for country in all_countries:
+            group_name = f"🌍 {country}" if country else "🌍 Other"
+            select_proxies.append(group_name)
+        select_proxies.extend(names)
+        proxy_groups.insert(0, {
+            "name": "🔰 PROXY",
+            "type": "select",
+            "proxies": select_proxies,
+        })
     else:
-        main_group["proxies"] = list(names)
-        proxy_groups.append(main_group)
+        # Simple: one SELECT group with all proxies + DIRECT
+        proxy_groups.append({
+            "name": "🔰 PROXY",
+            "type": "select",
+            "proxies": ["DIRECT", "REJECT"] + names,
+        })
 
-    # Auto url-test group
-    proxy_groups.append({
-        "name": "Auto",
-        "type": "url-test",
-        "url": "http://www.gstatic.com/generate_204",
-        "interval": 300,
-        "tolerance": 50,
-        "proxies": list(names),
-    })
+    # Basic rules
+    rules = [
+        "DOMAIN-SUFFIX,local,DIRECT",
+        "IP-CIDR,127.0.0.0/8,DIRECT",
+        "IP-CIDR,192.168.0.0/16,DIRECT",
+        "IP-CIDR,10.0.0.0/8,DIRECT",
+        "IP-CIDR,172.16.0.0/12,DIRECT",
+        "GEOIP,CN,DIRECT",
+        "MATCH,🔰 PROXY",
+    ]
 
-    # Assemble full config
     config = {
         "mixed-port": 7890,
         "socks-port": 7891,
@@ -637,10 +588,24 @@ def to_flclash(nodes: list[Node], tag_prefix: str = "", group_by_country: bool =
         "mode": "global",
         "log-level": "info",
         "external-controller": "127.0.0.1:9090",
-        "dns": dns_config,
+        "dns": {
+            "enable": True,
+            "use-hosts": True,
+            "enhanced-mode": "fake-ip",
+            "fake-ip-range": "198.18.0.1/16",
+            "default-nameserver": [
+                "https://8.8.8.8/dns-query",
+                "https://1.1.1.1/dns-query",
+            ],
+            "nameserver": [
+                "https://8.8.8.8/dns-query",
+                "https://1.1.1.1/dns-query",
+            ],
+            "fake-ip-filter": ["*.lan"],
+        },
         "proxies": proxy_dicts,
         "proxy-groups": proxy_groups,
-        "rules": ["MATCH, Quattro VPN"],
+        "rules": rules,
     }
 
     return _yaml.dump(config, default_flow_style=False, allow_unicode=True, sort_keys=False)
@@ -919,7 +884,7 @@ def convert(
     fmt: Format,
     tag_prefix: str = "",
     group_by_country: bool = False,
-    bare: bool = False,
+    **kwargs,  # deprecated: bare (kept for backward compat)
 ) -> str:
     """Convert nodes to the specified format.
 
@@ -927,8 +892,7 @@ def convert(
         nodes: List of parsed Node objects
         fmt: Target format
         tag_prefix: Prefix for auto-generated names
-        group_by_country: Whether to group proxies by country (flclash only)
-        bare: If True, output only proxies (no proxy-groups, rules, dns)
+        group_by_country: Create per-country proxy groups (FlClash only)
 
     Returns:
         Formatted string ready for use
@@ -936,9 +900,9 @@ def convert(
     if fmt == Format.SINGBOX:
         return to_singbox(nodes, tag_prefix)
     elif fmt == Format.MIHOMO:
-        return to_mihomo(nodes, tag_prefix, bare=bare)
+        return to_mihomo(nodes, tag_prefix)
     elif fmt == Format.FLCLASH:
-        return to_flclash(nodes, tag_prefix, group_by_country, bare=bare)
+        return to_flclash(nodes, tag_prefix, group_by_country=group_by_country)
     elif fmt == Format.TXT:
         return to_txt(nodes, tag_prefix)
     elif fmt == Format.XRAY:
