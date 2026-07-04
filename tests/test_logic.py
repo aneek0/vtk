@@ -280,16 +280,20 @@ class TestConverters:
     def test_flclash(self):
         nodes = [parse_vless(VLESS_LINK)]
         result = convert(nodes, Format.FLCLASH)
+        assert "proxies:" in result
         assert "mixed-port: 7890" in result
-        assert "proxy-groups:" in result
+        assert "dns:" in result
+        assert "proxy-groups" not in result
+        assert "rules" not in result
+        assert "Quattro VPN" not in result
 
-    def test_flclash_group_by_country(self):
-        link_ru = "vless://uuid@host:443?encryption=none#%F0%9F%87%B7%F0%9F%87%BA%20Russia"
-        link_us = "vless://uuid@host:443?encryption=none#%F0%9F%87%BA%F0%9F%87%B8%20USA"
-        nodes = [parse_vless(link_ru), parse_vless(link_us)]
-        result = convert(nodes, Format.FLCLASH, group_by_country=True)
-        assert "RU" in result
-        assert "US" in result
+    def test_flclash_dedup_names(self):
+        link1 = "vless://uuid@host:443?encryption=none#Same"
+        link2 = "vless://uuid2@host2:443?encryption=none#Same"
+        nodes = parse_text_input(link1 + "\n" + link2)
+        result = convert(nodes, Format.FLCLASH)
+        assert "proxies:" in result
+        assert "-1" in result or "-2" in result  # dedup suffix
 
     def test_txt(self):
         nodes = [parse_vless(VLESS_LINK)]

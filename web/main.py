@@ -878,8 +878,7 @@ async def api_proxy(
             nodes = [n for n in nodes if n.protocol != "error"]
 
             if nodes:
-                bare = output_format in ("mihomo", "clash") or request.query_params.get("bare", "") == "1"
-                result = convert(nodes, fmt, bare=bare)
+                result = convert(nodes, fmt)
                 if output_format == "base64":
                     import base64
                     result = base64.b64encode(result.encode()).decode()

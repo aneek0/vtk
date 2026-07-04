@@ -388,7 +388,8 @@ async def _process_input(message, text: str):
         filename = f"{safe_name}.{ext}"
     else:
         filename = f"config.{ext}"
-    if len(result) > 3000:
+    # YAML configs (mihomo/flclash) always as file
+    if ext == "yaml" or len(result) > 3000:
         await _reply_as_file(message, result, filename)
     elif result.strip():
         await message.reply(f"<pre>{result}</pre>", parse_mode=ParseMode.HTML)
