@@ -15,10 +15,10 @@ from core.converters import convert, Format
 # ---------------------------------------------------------------------------
 
 class TestFixLink:
-    def test_vless_adds_type_tcp(self):
+    def test_vless_adds_type_raw(self):
         link = "vless://uuid@host:443?encryption=none#Name"
         fixed = fix_link(link)
-        assert "type=tcp" in fixed
+        assert "type=raw" in fixed
 
     def test_vless_preserves_existing_type(self):
         link = "vless://uuid@host:443?encryption=none&type=ws#Name"
@@ -26,11 +26,17 @@ class TestFixLink:
         assert "type=ws" in fixed
         assert fixed.count("type=") == 1
 
+    def test_vless_preserves_type_raw(self):
+        link = "vless://uuid@host:443?encryption=none&type=raw#Name"
+        fixed = fix_link(link)
+        assert "type=raw" in fixed
+        assert fixed.count("type=") == 1
+
     def test_vless_type_before_fragment(self):
         link = "vless://uuid@host:443?encryption=none#Name"
         fixed = fix_link(link)
         q, frag = fixed.split("#", 1)
-        assert "type=tcp" in q
+        assert "type=raw" in q
         assert "Name" in frag
 
     def test_vless_ampersand_to_question(self):
@@ -39,7 +45,7 @@ class TestFixLink:
         assert fixed.startswith("vless://uuid@host:443?")
         q = fixed.split("#")[0].split("?", 1)[1]
         assert "encryption=none" in q
-        assert "type=tcp" in q
+        assert "type=raw" in q
 
     def test_vless_packet_encoding_normalize(self):
         link = "vless://uuid@host:443?packet-encoding=xudp#Name"
@@ -91,7 +97,7 @@ class TestParseVless:
     def test_without_type(self):
         link = "vless://uuid@host:443?encryption=none#Test"
         node = parse_vless(link)
-        assert node.net == "tcp"
+        assert node.net == "raw"
 
     def test_ws_transport(self):
         link = "vless://uuid@host:443?encryption=none&type=ws&path=%2Fws&host=example.com#WS"

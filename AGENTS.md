@@ -93,7 +93,7 @@ cli/       — CLI (typer)
 ### fix_link()
 Нормализует прокси-ссылки для совместимости (например, podkop):
 - `&` → `?` в начале query
-- Добавляет `type=tcp` если нет (vless)
+- Добавляет `type=raw` если нет (vless)
 - `packet-encoding=` → `packetEncoding=`
 
 ### Сериализация (round-trip)

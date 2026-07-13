@@ -95,7 +95,7 @@ class Node:
     port: int = 0
     name: str = ""
     # transport
-    net: str = "tcp"       # tcp, ws, grpc, h2, quic, xhttp
+    net: str = "raw"       # raw, ws, grpc, h2, quic, xhttp
     path: str = ""
     host: str = ""
     # security
@@ -162,9 +162,9 @@ class Node:
             raise ParseError("Missing password for Hysteria2 node")
 
         # Validate network type
-        valid_nets = ("tcp", "ws", "grpc", "h2", "quic", "xhttp")
+        valid_nets = ("tcp", "raw", "ws", "grpc", "h2", "quic", "xhttp")
         if self.net not in valid_nets:
-            self.net = "tcp"  # Auto-fix invalid transport
+            self.net = "raw"  # Auto-fix invalid transport
 
         return True
 
@@ -172,7 +172,7 @@ class Node:
         if self.protocol != "vless":
             raise ParseError(f"Cannot convert {self.protocol} to vless link")
         from urllib.parse import urlencode, quote
-        params = {"encryption": "none", "type": self.net or "tcp"}
+        params = {"encryption": "none", "type": self.net or "raw"}
         if self.tls:
             params["security"] = "tls"
             if self.sni:
@@ -272,10 +272,10 @@ def fix_link(link: str) -> str:
 
     Fixes:
     - vless/trojan: adds ? before first & if no ? present
-    - vless: adds type=tcp if missing (required by some clients like podkop)
-    - vless: normalizes packet-encoding -> packetEncoding
+    - vless: adds type=raw if missing (default transport)
+    - vless: removes invalid transport types (e.g. type=foo -> type=raw)
     - vless/trojan: removes known spam/malware query parameters
-    - vless: removes invalid transport types (e.g. type=raw -> type=tcp)
+    - vless: normalizes packet-encoding -> packetEncoding
     """
     link = link.strip()
     if not link:
@@ -338,10 +338,10 @@ def fix_link(link: str) -> str:
                     if len(v_decoded) > 200:
                         continue
 
-                    # Fix type=raw -> type=tcp
-                    if k == "type" and v_decoded not in ("tcp", "ws", "grpc", "h2", "quic", "xhttp"):
-                        v_decoded = "tcp"
-                        v = "tcp"
+                    # Fix invalid transport -> raw
+                    if k == "type" and v_decoded not in ("tcp", "raw", "ws", "grpc", "h2", "quic", "xhttp"):
+                        v_decoded = "raw"
+                        v = "raw"
 
                     params.append(f"{k}={v}")
 
@@ -353,11 +353,11 @@ def fix_link(link: str) -> str:
             if prefix == "vless://" and "type=" not in unquote(remainder):
                 hash_idx = remainder.find("#")
                 if hash_idx != -1:
-                    remainder = remainder[:hash_idx] + "&type=tcp" + remainder[hash_idx:]
+                    remainder = remainder[:hash_idx] + "&type=raw" + remainder[hash_idx:]
                 elif remainder.startswith("?"):
-                    remainder = remainder + "&type=tcp"
+                    remainder = remainder + "&type=raw"
                 else:
-                    remainder = remainder + "?type=tcp"
+                    remainder = remainder + "?type=raw"
 
             # Normalize packet-encoding -> packetEncoding
             remainder = remainder.replace("packet-encoding=", "packetEncoding=")
@@ -432,10 +432,10 @@ def parse_vless(link: str) -> Node:
     if not uuid:
         raise ParseError("Missing UUID")
     qs = _sanitize_params(parse_qs(parsed.query), _VLESS_KNOWN_PARAMS)
-    net = _get(qs, "type", "tcp")
-    # Reject invalid transport types — fallback to tcp
-    if net not in ("tcp", "ws", "grpc", "h2", "quic", "xhttp"):
-        net = "tcp"
+    net = _get(qs, "type", "raw")
+    # Reject invalid transport types — fallback to raw
+    if net not in ("tcp", "raw", "ws", "grpc", "h2", "quic", "xhttp"):
+        net = "raw"
     node = Node(
         protocol="vless",
         uuid=uuid,
@@ -761,7 +761,7 @@ _UA_LIST = [
 async def fetch_subscription(url: str, timeout: int = 15) -> str:
     """Fetch subscription content from URL directly (no external API)."""
     import httpx
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=False) as client:
         resp = await client.get(url)
         resp.raise_for_status()
         return resp.text
