@@ -166,7 +166,7 @@ async def fetch_sub_with_decrypt(url: str, api_key: str = "", timeout: int = 15)
     No external API calls needed — uses built-in decryptor.
     """
     import httpx
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=False) as client:
         resp = await client.get(url)
         resp.raise_for_status()
         text = resp.text
@@ -183,7 +183,7 @@ async def fetch_sub_with_decrypt_builtin(url: str, api_key: str = "", timeout: i
 
     Uses built-in decryptor when possible, falls back to API.
     """
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=False) as client:
         resp = await client.get(url)
         resp.raise_for_status()
         text = resp.text

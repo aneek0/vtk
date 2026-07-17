@@ -3,6 +3,7 @@
 import base64
 import json
 import re
+from datetime import datetime
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
@@ -245,6 +246,25 @@ class Node:
         if self.name:
             link += "#" + quote(self.name, safe="")
         return link
+
+    def to_link(self) -> str:
+        dispatch = {
+            "vless": self.to_vless_link,
+            "trojan": self.to_trojan_link,
+            "ss": self.to_ss_link,
+            "hysteria2": self.to_hysteria2_link,
+        }
+        fn = dispatch.get(self.protocol)
+        if fn:
+            return fn()
+        if self.protocol == "vmess":
+            return f"vmess://{self.address}:{self.port}"
+        if self.protocol == "ssr":
+            return f"ssr://{self.address}:{self.port}"
+        if self.protocol == "socks":
+            auth = f"{self.socks_username}:{self.socks_password}@" if self.socks_username else ""
+            return f"socks://{auth}{self.address}:{self.port}"
+        return f"{self.protocol}://{self.address}:{self.port}"
 
 
 # ---------------------------------------------------------------------------
@@ -758,12 +778,131 @@ _UA_LIST = [
 ]
 
 
-async def fetch_subscription(url: str, timeout: int = 15) -> str:
-    """Fetch subscription content from URL directly (no external API)."""
+async def fetch_subscription(url: str, timeout: int = 15, return_headers: bool = False):
+    """Fetch subscription content from URL directly (no external API).
+
+    If return_headers=True, returns {"content": str, "headers": [(key,val),...]}
+    """
     import httpx
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=False) as client:
         resp = await client.get(url)
         resp.raise_for_status()
+        if return_headers:
+            # Parse profile-title/profile-web-page-url from content (Clash/v2ray comments)
+            profile_title = ""
+            profile_url = ""
+            for line in resp.text.splitlines():
+                ls = line.strip()
+                if ls.lower().startswith("profile-title:"):
+                    profile_title = ls.split(":", 1)[1].strip()
+                elif ls.lower().startswith("profile-web-page-url:"):
+                    profile_url = ls.split(":", 1)[1].strip()
+
+            def _decode_val(v: str) -> str:
+                if v.startswith("base64:"):
+                    try:
+                        return _b64decode(v[7:])
+                    except Exception:
+                        return v
+                return v
+
+            def _format_bytes(b: int) -> str:
+                gb = b / (1024 ** 3)
+                return f"{gb:.1f}"
+
+            def _format_userinfo(val: str) -> str:
+                import re
+                parts = {}
+                for m in re.finditer(r'(\w+)=([^;]+)', val):
+                    parts[m.group(1)] = m.group(2)
+                items = []
+                up = parts.get("upload", "0")
+                if up == "0" or up.lower() == "unlimited":
+                    items.append("upload: unlimited")
+                else:
+                    items.append(f"upload: {_format_bytes(int(up))} GB")
+                dl = parts.get("download", "0")
+                items.append(f"download: {_format_bytes(int(dl))} GB")
+                total = parts.get("total", "0")
+                items.append(f"total: {_format_bytes(int(total))} GB")
+                expire = parts.get("expire", "")
+                if expire:
+                    try:
+                        dt = datetime.fromtimestamp(int(expire))
+                        items.append(f"expire: {dt.strftime('%d.%m.%Y')}")
+                    except (ValueError, OSError):
+                        items.append(f"expire: {expire}")
+                return " | ".join(items)
+
+            def _format_interval(val: str) -> str:
+                try:
+                    n = int(val)
+                    if n == 1:
+                        return "1h"
+                    return f"{n}h"
+                except ValueError:
+                    return val
+
+            h = resp.headers
+            resp_headers_list = []
+
+            # Profile-Title (from content comment or header)
+            if not profile_title:
+                pt = h.get("profile-title", "")
+                if pt:
+                    profile_title = _decode_val(pt)
+            if profile_title:
+                resp_headers_list.append(("Profile-Title", profile_title))
+
+            # Account (from content-disposition filename)
+            cd = h.get("content-disposition", "")
+            if "filename=" in cd:
+                import re
+                m = re.search(r'filename=([^;\s]+)', cd)
+                if m:
+                    acc = m.group(1).strip().strip('"')
+                    if acc:
+                        resp_headers_list.append(("Account", acc))
+
+            # Subscription-Userinfo
+            si = h.get("subscription-userinfo", "")
+            if si:
+                resp_headers_list.append(("Subscription-Userinfo", _format_userinfo(si)))
+
+            # Update-Interval
+            ui = h.get("profile-update-interval", "")
+            if ui:
+                resp_headers_list.append(("Update-Interval", _format_interval(ui)))
+
+            # Content-Type
+            ct = h.get("content-type", "")
+            if ct:
+                resp_headers_list.append(("Content-Type", ct))
+
+            # Support-Url
+            su = h.get("support-url", "")
+            if su:
+                resp_headers_list.append(("Support-Url", su))
+
+            # Announce (base64 decoded)
+            an = h.get("announce", "")
+            if an:
+                resp_headers_list.append(("Announce", _decode_val(an)))
+
+            # Announce-Url
+            au = h.get("announce-url", "")
+            if au:
+                resp_headers_list.append(("Announce-Url", au))
+
+            # Profile-Web-Page-Url (from content comment or header)
+            if not profile_url:
+                pw = h.get("profile-web-page-url", "")
+                if pw:
+                    profile_url = pw
+            if profile_url:
+                resp_headers_list.append(("Profile-Web-Page-Url", profile_url))
+
+            return {"content": resp.text, "headers": resp_headers_list}
         return resp.text
 
 

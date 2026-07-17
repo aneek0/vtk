@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VTK — Proxy Toolkit</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>⚡</text></svg>">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <button id="themeToggle" class="theme-toggle" title="Toggle theme">☀</button>
+  <h1>◆ VTK</h1>
+  <div class="sub">Proxy converter · Happ decoder · Subscription proxy</div>
+</header>
+
+<input type="radio" name="tab" id="rb-convert"{{ ' checked' if tab == 'convert' else '' }}>
+<input type="radio" name="tab" id="rb-proxy"{{ ' checked' if tab == 'proxy' else '' }}>
+<input type="radio" name="tab" id="rb-decrypt"{{ ' checked' if tab == 'decrypt' else '' }}>
+<input type="radio" name="tab" id="rb-api"{{ ' checked' if tab == 'api' else '' }}>
+<div class="tab-bar">
+  <a href="/convert" class="tab-btn" id="tab-convert">CONVERT</a>
+  <a href="/proxy" class="tab-btn" id="tab-proxy">PROXY</a>
+  <a href="/decrypt" class="tab-btn" id="tab-decrypt">DECRYPT</a>
+  <a href="/api" class="tab-btn" id="tab-api">API</a>
+</div>
+
+<main id="main">
+<!-- CONVERT TAB -->
+<div class="tab-content" id="content-convert">
+  <label>Links / subscription / config</label>
+  <textarea id="convertInput" placeholder="vless://... vmess://... trojan://...&#10;https://sub.url ...  happ://crypt*...&#10;(several links — one per line)"></textarea>
+  <div style="font-size:0.75rem;color:var(--muted);margin-top:0.2rem">happ://crypt* — also supported (auto-decrypted)</div>
+  <div class="row">
+    <div>
+      <label>Format</label>
+      <select id="convertFormat">
+        <option value="singbox">sing-box JSON</option>
+        <option value="mihomo">mihomo YAML</option>
+        <option value="flclash">FlClash YAML</option>
+        <option value="xray">XRAY JSON</option>
+        <option value="txt">Plain text</option>
+      </select>
+    </div>
+    <div>
+      <label>Tag prefix</label>
+      <input type="text" id="tagPrefix" placeholder="optional">
+    </div>
+  </div>
+  <button class="btn" onclick="convertLinks()" data-text-content="CONVERT">[ CONVERT ]</button>
+
+  <div id="convertHeadersSection" class="sub-section" style="display:none">
+    <div class="sub-label">► subscription headers</div>
+    <div id="convertHeaders" class="sub-headers-grid"></div>
+  </div>
+
+  <div id="convertBodySection" class="sub-section" style="display:none">
+    <div class="sub-label">body (decoded) [<span id="bodyTypeLabel">vless list</span>]</div>
+    <details id="convertBodySpoiler" class="body-spoiler">
+      <summary>body</summary>
+      <div class="body-content">
+        <button class="copy-btn" onclick="copyResult('convertBodyContent')" style="float:right">Copy</button>
+        <pre id="convertBodyContent"></pre>
+      </div>
+    </details>
+  </div>
+
+  <div id="convertServersSection" class="sub-section" style="display:none">
+    <div class="sub-label">
+      <span id="serversTitle">► servers</span>
+      <button class="copy-btn" onclick="copyAllServers()">Copy all</button>
+    </div>
+    <div id="convertServers" class="servers-list"></div>
+  </div>
+
+  <div id="convertResult" class="result-box" style="margin-top:1rem">
+    <div class="result-shell">
+      <div id="convertResultContent" class="result-content success"></div>
+      <button class="copy-btn" onclick="copyResult('convertResultContent')">COPY</button>
+    </div>
+  </div>
+</div>
+
+<!-- PROXY TAB -->
+<div class="tab-content" id="content-proxy">
+  <label>Subscription URL</label>
+  <input type="text" id="proxyUrl" placeholder="https://sub.example.com/...">
+  <div class="row">
+    <div><label>User-Agent</label><input type="text" id="proxyUa" placeholder="Happ/3.24.1"></div>
+    <div><label>HWID</label><input type="text" id="proxyHwid" placeholder="device-id"></div>
+  </div>
+  <div class="row">
+    <div><label>OS</label>
+      <select id="proxyOs"><option>android</option><option>ios</option></select>
+    </div>
+    <div><label>Version</label><input type="text" id="proxyVer" placeholder="3.24.1"></div>
+  </div>
+  <div class="row">
+    <div><label>Model</label><input type="text" id="proxyModel" placeholder="Pixel 8"></div>
+    <div><label>Locale</label><input type="text" id="proxyLocale" placeholder="ru_RU"></div>
+  </div>
+  <label>Output format</label>
+  <select id="proxyFormat">
+    <option value="as_is">as-is (raw)</option>
+    <option value="singbox">sing-box JSON</option>
+    <option value="mihomo">mihomo YAML</option>
+    <option value="flclash">flClash YAML</option>
+    <option value="xray">xray JSON</option>
+    <option value="txt">txt (share links)</option>
+    <option value="base64">base64</option>
+  </select>
+  <div class="row">
+    <button class="btn" onclick="proxyFetch()">[ PROXY GET ]</button>
+    <button class="btn btn-rnd" onclick="randomizeProxy()">[ RANDOM ]</button>
+  </div>
+  <div id="proxyResult" class="result-box">
+    <div id="proxyResultContent" class="result-content success"></div>
+  </div>
+</div>
+
+<!-- DECRYPT TAB -->
+<div class="tab-content" id="content-decrypt">
+  <label>happ:// link or text with links</label>
+  <textarea id="decryptInput" placeholder="happ://crypt5/..." rows="3"></textarea>
+  <div class="row row-stretch">
+    <button class="btn" onclick="decryptLink()">[ DECRYPT URL ]</button>
+    <button class="btn" onclick="decryptText()">[ DECRYPT TEXT ]</button>
+  </div>
+  <button class="copy-btn" onclick="clearDecrypt()" style="margin-top:0.5rem">[ CLEAR ]</button>
+  <div id="decryptResult" class="result-box">
+    <div class="result-shell">
+      <div id="decryptResultContent" class="result-content success"></div>
+      <button class="copy-btn" onclick="copyResult('decryptResultContent')">COPY</button>
+    </div>
+  </div>
+</div>
+
+<!-- API TAB -->
+<div class="tab-content" id="content-api">
+  <label>Converter API</label>
+  <div style="font-size:0.72rem;color:var(--muted);line-height:2">
+    <code>POST /api/convert</code> — JSON body <code>{"input":"...","format":"..."}</code><br>
+    &nbsp;&nbsp;Convert proxy links / subscriptions / configs<br>
+    &nbsp;&nbsp;<span class="api-example">curl -X POST /api/convert -H 'Content-Type: application/json' -d '{"input":"vless://...","format":"singbox"}'</span><br>
+    <code>GET /api/extract?input=...</code><br>
+    &nbsp;&nbsp;Extract share links from sing-box / mihomo config<br>
+    <code>GET /api/check?link=...</code><br>
+    &nbsp;&nbsp;Validate a single proxy link
+  </div>
+
+  <label style="margin-top:1rem">Passthrough</label>
+  <div style="font-size:0.72rem;color:var(--muted);line-height:2">
+    <code>GET /p/{params}/{url}</code><br>
+    &nbsp;&nbsp;Fetch subscription via proxy with custom headers<br>
+    &nbsp;&nbsp;<span class="api-example">/p/android,ua=Happ/3.24.1,hwid=.../https://sub.example.com/abc?format=singbox</span>
+  </div>
+
+  <label style="margin-top:1rem">Rate Limiting</label>
+  <div style="font-size:0.72rem;color:var(--muted);line-height:2">
+    <strong>10 req/min</strong> per IP for all endpoints<br>
+    Overlimit → <span class="api-example">HTTP 429 {"error":"rate limit exceeded"}</span><br>
+    Retry-After header is set
+  </div>
+</div>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
