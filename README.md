@@ -12,7 +12,7 @@ Three interfaces — Telegram bot, web (FastAPI), CLI — sharing one core.
 - `ssr://`
 - `hysteria2://`
 - `socks://`
-- `happ://crypt*` (auto-decrypted via [Happy Decoder API](https://happy-decoder.cc/api))
+- `happ://crypt*` (auto-decrypted)
 
 ## Supported output formats
 
