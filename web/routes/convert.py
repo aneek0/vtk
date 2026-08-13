@@ -4,8 +4,23 @@ from fastapi.responses import JSONResponse
 from core.logic import Node, parse_text_input, parse_subscription_text, fetch_subscription, ParseError
 from core.converters import Format, convert, to_txt
 from core.reverse import from_config
+from core.fingerprint import generate_device_fingerprint
 
 router = APIRouter()
+
+
+def _device_headers(device: dict, on: bool) -> dict | None:
+    """Build device headers from a dict of device params if `on` is True."""
+    if not on:
+        return None
+    return generate_device_fingerprint(
+        ua=device.get("ua", ""),
+        hwid=device.get("hwid", ""),
+        os_name=device.get("os", ""),
+        ver=device.get("ver", ""),
+        model=device.get("model", ""),
+        locale=device.get("locale", ""),
+    )
 
 
 def _node_to_dict(node: Node) -> dict:
@@ -96,8 +111,11 @@ async def api_extract(input: str = Query(..., help="sing-box JSON or mihomo YAML
 @router.post("/api/convert")
 async def api_convert(body: dict):
     """JSON API — convert links to specified format.
-    
-    POST body: {"input": "...", "format": "singbox", "tag_prefix": ""}
+
+    POST body: {"input": "...", "format": "singbox", "tag_prefix": "",
+                "device_on": false,
+                "device": {"os": "android", "ua": "...", "ver": "...",
+                           "model": "...", "locale": "...", "hwid": "..."}}
     """
     from core.settings import load_settings
 
@@ -107,12 +125,15 @@ async def api_convert(body: dict):
 
     fmt_str = body.get("format", "singbox")
     tag_prefix = body.get("tag_prefix", "")
+    device = body.get("device") or {}
+    device_on = bool(body.get("device_on", False))
+    headers = _device_headers(device, device_on)
     s = load_settings()
     sub_headers = []
 
     if text.startswith(("http://", "https://")) and "\n" not in text:
         try:
-            resp = await fetch_subscription(text, timeout=s.timeout, return_headers=True)
+            resp = await fetch_subscription(text, timeout=s.timeout, return_headers=True, headers=headers)
             sub_headers = resp.get("headers", [])
             content = resp.get("content", "")
             nodes = parse_subscription_text(content)
@@ -146,6 +167,13 @@ async def api_convert_get(
     input: str = Query(..., help="Proxy link, URL, or raw content"),
     format: str = Query("singbox", help="Output format: singbox, mihomo, txt"),
     tag_prefix: str = Query("", help="Tag prefix"),
+    device_on: bool = Query(False, help="Send device headers"),
+    os: str = Query("", help="Device OS (android/ios)"),
+    ua: str = Query("", help="User-Agent"),
+    ver: str = Query("", help="App version"),
+    model: str = Query("", help="Device model"),
+    locale: str = Query("", help="Locale e.g. ru_RU"),
+    hwid: str = Query("", help="HWID"),
 ):
     """GET variant — for small inputs only (URL length limit ~2K)."""
     from core.settings import load_settings
@@ -153,10 +181,12 @@ async def api_convert_get(
     s = load_settings()
     text = input.strip()
     sub_headers = []
+    device = {"os": os, "ua": ua, "ver": ver, "model": model, "locale": locale, "hwid": hwid}
+    headers = _device_headers(device, device_on)
 
     if text.startswith(("http://", "https://")) and "\n" not in text:
         try:
-            resp = await fetch_subscription(text, timeout=s.timeout, return_headers=True)
+            resp = await fetch_subscription(text, timeout=s.timeout, return_headers=True, headers=headers)
             sub_headers = resp.get("headers", [])
             content = resp.get("content", "")
             nodes = parse_subscription_text(content)

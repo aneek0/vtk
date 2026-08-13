@@ -16,10 +16,15 @@ from aiogram.types import (
 from aiogram.filters import Command
 from aiogram.enums import ParseMode
 
-from core.logic import parse_link, parse_text_input, parse_subscription_text, ParseError
+from core.logic import parse_link, parse_text_input, parse_subscription_text, fetch_subscription, extract_subscription_name, ParseError
 from core.converters import convert, Format, to_txt
 from core.reverse import from_config
 from core.settings import load_settings, save_settings
+from core.fingerprint import (
+    parse_device_params, generate_device_fingerprint, to_params_string,
+    parse_app_proxy_url, get_proxy_base, random_device,
+)
+from core.settings import Settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -50,6 +55,7 @@ CB_SUB_FMT = "sub"
 CB_LINK_FMT = "link"
 CB_CONFIG_FMT = "cfg"
 CB_TXT_FMT = "txt"
+CB_PROXY = "proxy"
 
 
 def _format_kb(prefix: str, current: Format) -> InlineKeyboardMarkup:
@@ -96,9 +102,63 @@ def _main_kb(s) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton(
+                text="📱 Proxy device",
+                callback_data=CB_PROXY,
+            )
+        ],
+        [
+            InlineKeyboardButton(
                 text=f"{'✅' if s.sub_passthrough else '❌'} Passthrough (proxy link)",
                 callback_data="sub_passthrough",
             )
+        ],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _short(v: str, n: int = 14) -> str:
+    return (v[:n] + "…") if v and len(v) > n else (v or "—")
+
+
+def _proxy_kb(s: Settings) -> InlineKeyboardMarkup:
+    """Proxy device fingerprint settings keyboard."""
+    hs = "✅" if s.proxy_headers_on else "❌"
+    hwid = "✅" if s.proxy_hwid_on else "❌"
+    os_name = (s.proxy_os or "android").lower()
+    rows = [
+        [
+            InlineKeyboardButton(text=f"{hs} Send device headers", callback_data="proxy_headers_on"),
+        ],
+        [
+            InlineKeyboardButton(
+                text=f"📱 OS: {os_name}",
+                callback_data="proxy_os",
+            ),
+        ],
+        [
+            InlineKeyboardButton(
+                text=f"{hwid} HWID: {_short(s.proxy_hwid)}",
+                callback_data="proxy_hwid_on",
+            ),
+        ],
+        [
+            InlineKeyboardButton(text=f"🆔 UA: {_short(s.proxy_ua)}", callback_data="proxy_ignore"),
+        ],
+        [
+            InlineKeyboardButton(text=f"🏷 Ver: {_short(s.proxy_ver)}", callback_data="proxy_ignore"),
+            InlineKeyboardButton(text=f"📱 Model: {_short(s.proxy_model)}", callback_data="proxy_ignore"),
+        ],
+        [
+            InlineKeyboardButton(text=f"🌐 Locale: {_short(s.proxy_locale)}", callback_data="proxy_ignore"),
+        ],
+        [
+            InlineKeyboardButton(text="🎲 Randomize", callback_data="proxy_random"),
+        ],
+        [
+            InlineKeyboardButton(text="🧹 Clear", callback_data="proxy_clear"),
+        ],
+        [
+            InlineKeyboardButton(text="🔙 Back", callback_data="back"),
         ],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -163,7 +223,8 @@ async def cmd_help(message: Message):
         "  📋 Subs — subscription URLs\n"
         "  🔗 Links — single/multi proxy links\n"
         "  ⚙️ Configs — JSON/YAML configs → share links\n"
-        "  📝 TXT — TXT files with links",
+        "  📝 TXT — TXT files with links\n"
+        "  📱 Proxy — device headers for subscriptions (import from app-link)",
         parse_mode=ParseMode.HTML,
     )
 
@@ -192,6 +253,38 @@ async def cmd_settings(message: Message):
         "Select output format for each input type:"
     )
     await message.reply(text, reply_markup=_main_kb(s), parse_mode=ParseMode.HTML)
+
+
+@router.message(Command("proxy"))
+async def cmd_proxy(message: Message):
+    """Proxy device settings. Usage: /proxy [set <android,ver=..,ua=..,hwid=..>]"""
+    parts = message.text.split(maxsplit=1)
+    s = load_settings()
+    if len(parts) >= 2 and parts[1].strip().lower().startswith("set"):
+        rest = parts[1][3:].strip()
+        params = parse_device_params(rest)
+        if "os" in params:
+            s.proxy_os = params["os"]
+        if "ua" in params:
+            s.proxy_ua = params["ua"]
+        if "ver" in params:
+            s.proxy_ver = params["ver"]
+        if "model" in params:
+            s.proxy_model = params["model"]
+        if "locale" in params:
+            s.proxy_locale = params["locale"]
+        if "hwid" in params:
+            s.proxy_hwid = params["hwid"]
+        save_settings(s)
+        await message.reply(f"✅ Proxy device params saved.")
+        return
+    text = (
+        "📱 <b>Proxy device</b>\n\n"
+        "Configure device headers sent to subscriptions.\n"
+        "Send a web app-link (…/<code>/p/android,ua=…/https://…</code>) to import.\n"
+        "/proxy set android,ver=3.8.13,ua=Happ/3.26.0,hwid=abc — set manually"
+    )
+    await message.reply(text, reply_markup=_proxy_kb(s), parse_mode=ParseMode.HTML)
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +358,82 @@ async def cb_back(callback: CallbackQuery):
 
 
 # ---------------------------------------------------------------------------
+# Proxy device callbacks
+# ---------------------------------------------------------------------------
+
+@router.callback_query(F.data == CB_PROXY)
+async def cb_proxy_menu(callback: CallbackQuery):
+    s = load_settings()
+    text = (
+        "📱 <b>Proxy device</b>\n\n"
+        "Device headers sent to subscriptions when «Send device headers» is on.\n"
+        "Send a web app-link to import its device params."
+    )
+    await callback.message.edit_text(text, reply_markup=_proxy_kb(s), parse_mode=ParseMode.HTML)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "proxy_headers_on")
+async def cb_proxy_headers(callback: CallbackQuery):
+    s = load_settings()
+    s.proxy_headers_on = not s.proxy_headers_on
+    save_settings(s)
+    await callback.answer()
+    await cb_proxy_menu(callback)
+
+
+@router.callback_query(F.data == "proxy_os")
+async def cb_proxy_os(callback: CallbackQuery):
+    s = load_settings()
+    s.proxy_os = "ios" if (s.proxy_os or "android").lower() == "android" else "android"
+    save_settings(s)
+    await callback.answer()
+    await cb_proxy_menu(callback)
+
+
+@router.callback_query(F.data == "proxy_hwid_on")
+async def cb_proxy_hwid(callback: CallbackQuery):
+    s = load_settings()
+    s.proxy_hwid_on = not s.proxy_hwid_on
+    save_settings(s)
+    await callback.answer()
+    await cb_proxy_menu(callback)
+
+
+@router.callback_query(F.data == "proxy_random")
+async def cb_proxy_random(callback: CallbackQuery):
+    s = load_settings()
+    d = random_device()
+    s.proxy_os = d["os"]
+    s.proxy_ua = d["ua"]
+    s.proxy_ver = d["ver"]
+    s.proxy_model = d["model"]
+    s.proxy_locale = d["locale"]
+    s.proxy_hwid = d["hwid"]
+    save_settings(s)
+    await callback.answer("🎲 Randomized")
+    await cb_proxy_menu(callback)
+
+
+@router.callback_query(F.data == "proxy_clear")
+async def cb_proxy_clear(callback: CallbackQuery):
+    s = load_settings()
+    s.proxy_ua = ""
+    s.proxy_ver = ""
+    s.proxy_model = ""
+    s.proxy_locale = ""
+    s.proxy_hwid = ""
+    save_settings(s)
+    await callback.answer("🧹 Cleared")
+    await cb_proxy_menu(callback)
+
+
+@router.callback_query(F.data == "proxy_ignore")
+async def cb_proxy_ignore(callback: CallbackQuery):
+    await callback.answer()
+
+
+# ---------------------------------------------------------------------------
 # Message handler (text + documents)
 # ---------------------------------------------------------------------------
 
@@ -275,6 +444,31 @@ async def _process_input(message, text: str):
     input_type = _detect_input(text)
     sub_name = ""  # extracted subscription name for filename
 
+    # Import device params from a pasted web app-link (…/p/<params>/<url>)
+    app_link = parse_app_proxy_url(text)
+    if app_link:
+        p = app_link["params"]
+        s.proxy_headers_on = True
+        if p.get("os"):
+            s.proxy_os = p["os"]
+        if p.get("ua"):
+            s.proxy_ua = p["ua"]
+        if p.get("ver"):
+            s.proxy_ver = p["ver"]
+        if p.get("model"):
+            s.proxy_model = p["model"]
+        if p.get("locale"):
+            s.proxy_locale = p["locale"]
+        if p.get("hwid"):
+            s.proxy_hwid = p["hwid"]
+        save_settings(s)
+        text = app_link["target_url"]
+        input_type = "sub"
+        await message.reply(
+            "📥 Imported device params from app-link. Headers ON.",
+            parse_mode=ParseMode.HTML,
+        )
+
     # Decrypt happ:// links before processing
     from core.happ import is_happ, decrypt_text, _get_key
     if is_happ(text):
@@ -284,6 +478,16 @@ async def _process_input(message, text: str):
             await message.reply(f"❌ Happ decrypt failed: {e}")
             return
 
+    # Device headers (only when explicitly enabled)
+    device_headers = None
+    if s.proxy_headers_on:
+        fp = generate_device_fingerprint(
+            ua=s.proxy_ua, hwid=s.proxy_hwid if s.proxy_hwid_on else "",
+            os_name=s.proxy_os, ver=s.proxy_ver, model=s.proxy_model,
+            locale=s.proxy_locale,
+        )
+        device_headers = fp
+
     # Fetch subscription URL
     if input_type == "sub":
         status_msg = await message.reply("⏳ Fetching subscription...")
@@ -291,7 +495,7 @@ async def _process_input(message, text: str):
             import asyncio
             from core.logic import fetch_subscription, extract_subscription_name
             sub_url = text.strip()
-            content = await fetch_subscription(sub_url, timeout=s.timeout)
+            content = await fetch_subscription(sub_url, timeout=s.timeout, headers=device_headers)
             sub_name = extract_subscription_name(sub_url, content)
 
             # Always parse nodes for conversion
@@ -304,7 +508,12 @@ async def _process_input(message, text: str):
 
             # Passthrough: send proxy URL + raw JSON file
             if s.sub_passthrough:
-                proxy_url = f"https://happy-decoder.cc/p/{sub_url}"
+                params_str = to_params_string({
+                    "os": s.proxy_os, "ver": s.proxy_ver, "model": s.proxy_model,
+                    "ua": s.proxy_ua, "locale": s.proxy_locale,
+                    "hwid": s.proxy_hwid if s.proxy_hwid_on else "",
+                })
+                proxy_url = f"{get_proxy_base()}/p/{params_str}/{sub_url}"
                 await message.reply(
                     f"🔗 <b>Proxy link:</b>\n<code>{proxy_url}</code>\n\n"
                     f"📋 Parsed {len(nodes)} nodes «{sub_name}»",
@@ -427,6 +636,7 @@ async def _set_commands(bot: Bot):
         BotCommand(command="start", description="Welcome & usage"),
         BotCommand(command="help", description="How to use"),
         BotCommand(command="settings", description="Configure output formats"),
+        BotCommand(command="proxy", description="Configure proxy device headers"),
         BotCommand(command="happkey", description="Set Happy Decoder API key"),
     ])
 

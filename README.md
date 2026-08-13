@@ -36,6 +36,7 @@ uv sync --all-extras
 |---------------|----------------------------------------------------------------|
 | `VTK_BOT_TOKEN` | Telegram bot token (for bot interface)                       |
 | `VTK_HAPP_KEY`  | Happy Decoder API key (optional, falls back to demo 5 req/min) |
+| `VTK_PROXY_BASE` | Base host for passthrough `/p/<params>/<url>` links (default `https://vtk.aneeko.qzz.io`) |
 
 ### CLI
 
@@ -57,11 +58,13 @@ export VTK_BOT_TOKEN=xxx
 uv run python -m bot.main
 ```
 
-Commands: `/start`, `/help`, `/settings`, `/happkey`
+Commands: `/start`, `/help`, `/settings`, `/proxy`, `/happkey`
 
 Features:
 - Auto-detects input type (link / subscription URL / config / TXT)
 - Inline keyboard for per-type output format settings
+- 📱 Proxy device menu: toggles for "send device headers" + HWID, OS switch, Randomize, Clear
+- Import device settings from a pasted web app-link (`https://host/p/android,ver=…,ua=…,hwid=…/https://sub…`)
 - File upload support (documents processed same as text)
 - Rate limiting (3 msg/sec per user)
 - `happ://crypt*` auto-decryption
@@ -77,6 +80,9 @@ HTML form + JSON API endpoints:
 - `GET /api/convert?input=...&format=singbox` — convert
 - `GET /api/extract?input=...` — config → share links
 - `GET /api/check?link=...` — validate single link
+- `GET /api/device/random` — random device fingerprint params (shared with bot)
+- Convert tab has optional device-header fields (UA/HWID/OS/Ver/Model/Locale) + "Send device headers" toggle + Randomize
+- PROXY tab builds `/p/<params>/<url>` app-links (host = `VTK_PROXY_BASE`)
 
 ## Project structure
 

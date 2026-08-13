@@ -174,9 +174,18 @@ async function convertLinks(){
   if(!input){showResult('convertResult','Enter links',false);return}
   var format=document.getElementById('convertFormat').value;
   var prefix=document.getElementById('tagPrefix').value;
+  var deviceOn=document.getElementById('convertDeviceOn').checked;
+  var device={
+    os:document.getElementById('convertOs').value.trim(),
+    ua:document.getElementById('convertUa').value.trim(),
+    ver:document.getElementById('convertVer').value.trim(),
+    model:document.getElementById('convertModel').value.trim(),
+    locale:document.getElementById('convertLocale').value.trim(),
+    hwid:document.getElementById('convertHwid').value.trim()
+  };
   showSpinner('convertResult');
   try{
-    var d=await apiPost('/api/convert',{input:input,format:format,tag_prefix:prefix});
+    var d=await apiPost('/api/convert',{input:input,format:format,tag_prefix:prefix,device_on:deviceOn,device:device});
   }catch(e){showResult('convertResult','Error: '+e.message,false);return}
   hideSpinner('convertResult');
 
@@ -364,40 +373,17 @@ function proxyQR(){
   }else new QRCode(container,{text:url.href,width:180,height:180});
 }
 
-function randomizeProxy(){
-  var agents=[
-    'Happ/3.24.1','Happ/3.23.0','Happ/3.22.0','Happ/3.21.0','Happ/3.20.2','Happ/3.19.0','Happ/3.18.2','Happ/3.17.0','Happ/3.16.0','Happ/3.15.1',
-    'Happ/3.14.0','Happ/4.0.0','Happ/4.0.1','Happ/4.1.0','Happ/3.25.0','Happ/3.26.0'
-  ];
-  var iosModels=[
-    'iPhone 16 Pro Max','iPhone 16 Pro','iPhone 16 Plus','iPhone 16',
-    'iPhone 15 Pro Max','iPhone 15 Pro','iPhone 15 Plus','iPhone 15',
-    'iPhone 14 Pro Max','iPhone 14 Pro','iPhone 14 Plus','iPhone 14',
-    'iPhone 13 Pro Max','iPhone 13 Pro','iPhone 13','iPhone SE (3rd gen)',
-    'iPad Pro 13 (M4)','iPad Pro 11 (M4)','iPad Air (M2)'
-  ];
-  var androidModels=[
-    'Pixel 9 Pro XL','Pixel 9 Pro','Pixel 9','Pixel 8 Pro','Pixel 8','Pixel 7 Pro','Pixel 7',
-    'Samsung Galaxy S25 Ultra','Samsung Galaxy S25+','Samsung Galaxy S25',
-    'Samsung Galaxy S24 Ultra','Samsung Galaxy S24+','Samsung Galaxy S24',
-    'Samsung Galaxy S23 Ultra','Samsung Galaxy S23+','Samsung Galaxy S23',
-    'Samsung Galaxy Z Fold6','Samsung Galaxy Z Flip6',
-    'OnePlus 13','OnePlus 12','OnePlus Open',
-    'Xiaomi 14 Pro','Xiaomi 14','Xiaomi 13T Pro',
-    'Nothing Phone (3)','Nothing Phone (2a)',
-    'Xperia 1 VI','Xperia 5 V',
-    'Motorola Edge 50 Ultra','Motorola Edge 50 Pro',
-    'Huawei P60 Pro','Huawei Mate 60 Pro',
-    'Asus ROG Phone 9','Asus Zenfone 12'
-  ];
-  var locales=['en_US','ru_RU','de_DE','fr_FR','es_ES','pt_BR','zh_CN','ja_JP','ko_KR','it_IT','tr_TR','pl_PL','uk_UA','ar_SA'];
-  var r=function(a){return a[Math.floor(Math.random()*a.length)]};
-  var os=r(['ios','android']);
-  document.getElementById('proxyUa').value=r(agents);
-  document.getElementById('proxyHwid').value=Array.from({length:12},function(){return Math.floor(Math.random()*16).toString(16)}).join('');
-  var osSel=document.getElementById('proxyOs'); osSel.value=os; osSel.dispatchEvent(new Event('_sync'));
-  var major=Math.floor(Math.random()*3)+3; var minor=Math.floor(Math.random()*30); var patch=Math.floor(Math.random()*15);
-  document.getElementById('proxyVer').value=major+'.'+minor+'.'+patch;
-  document.getElementById('proxyModel').value=r(os==='ios'?iosModels:androidModels);
-  document.getElementById('proxyLocale').value=r(locales);
+async function _applyRandom(prefix){
+  try{
+    var d=await (await fetch('/api/device/random')).json();
+    document.getElementById(prefix+'Os').value=d.os||'android';
+    document.getElementById(prefix+'Ua').value=d.ua||'';
+    document.getElementById(prefix+'Ver').value=d.ver||'';
+    document.getElementById(prefix+'Model').value=d.model||'';
+    document.getElementById(prefix+'Locale').value=d.locale||'';
+    document.getElementById(prefix+'Hwid').value=d.hwid||'';
+  }catch(e){/* ignore */}
 }
+function randomizeProxy(){ _applyRandom('proxy'); }
+function randomizeConvert(){ _applyRandom('convert'); }
+

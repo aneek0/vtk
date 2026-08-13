@@ -778,14 +778,17 @@ _UA_LIST = [
 ]
 
 
-async def fetch_subscription(url: str, timeout: int = 15, return_headers: bool = False):
+async def fetch_subscription(url: str, timeout: int = 15, return_headers: bool = False, headers: dict | None = None):
     """Fetch subscription content from URL directly (no external API).
 
     If return_headers=True, returns {"content": str, "headers": [(key,val),...]}
+
+    `headers` (optional) are merged into the request (e.g. device fingerprint
+    headers for proxied subscriptions).
     """
     import httpx
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=False) as client:
-        resp = await client.get(url)
+        resp = await client.get(url, headers=headers or None)
         resp.raise_for_status()
         if return_headers:
             # Parse profile-title/profile-web-page-url from content (Clash/v2ray comments)

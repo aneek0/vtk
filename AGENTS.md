@@ -114,10 +114,45 @@ link2 = node.to_vless_link()  # round-trip
 Хранятся в `~/.config/vtk/settings.json`. Для каждого типа входа свой формат:
 `sub_format`, `link_format`, `config_format`, `txt_format`, `group_by_country`.
 
+### Device fingerprint (proxy device headers)
+Отдельная группа настроек для подстановки device-заголовков (User-Agent, X-Hwid,
+X-Device-Os/Model, Accept-Language) в запросы подписок:
+`proxy_headers_on` (отправлять только если включено), `proxy_os`, `proxy_ua`,
+`proxy_ver`, `proxy_model`, `proxy_locale`, `proxy_hwid`, `proxy_hwid_on`.
+
+Базовый хост для passthrough-ссылок `/p/<params>/<url>` задаётся через
+переменную окружения `VTK_PROXY_BASE` (по умолчанию `https://vtk.aneeko.qzz.io`).
+
+Вся логика device-отпечатка — в `core/fingerprint.py` (единственный источник
+истины, переиспользуется ботом, вебом и `/api/device/random`).
+
+### Импорт из веб-ссылки
+Бот умеет принимать ссылку вида
+`https://host/p/android,ver=3.8.13,model=OnePlus%20Open,ua=Happ/3.26.0,locale=ja_JP,hwid=8ddcfe6b6b55/https://sub...`
+(`core.fingerprint.parse_app_proxy_url`, host-agnostic) и переписывать
+device-настройки, включая `proxy_headers_on`.
+
+## Структура
+
+```
+core/
+  logic.py       — парсинг ссылок, fix_link(), fetch subscriptions (headers=), extract_country()
+  converters.py  — singbox / mihomo / flclash / txt output
+  fingerprint.py — device fingerprint: parse/generate params, app-link parse, random, get_proxy_base
+  reverse.py     — обратная конвертация (config → share links)
+  settings.py    — настройки пользователя (включая proxy device)
+  happ.py        — интеграция с Happy Decoder API
+bot/       — Telegram bot (aiogram 3): /settings, /proxy, меню device, импорт app-link
+web/       — FastAPI: /convert, /proxy (/p/<params>/<url>), /api/device/random, HTML
+cli/       — CLI (typer)
+```
+
 ## Тесты
 
 ```bash
 pytest tests/
 ```
 
-Покрытие: fix_link, все парсеры, все конвертеры, round-trip, извлечение страны, обработка ошибок.
+Покрытие: fix_link, все парсеры, все конвертеры, round-trip, извлечение страны,
+обработка ошибок, device fingerprint (`test_fingerprint.py`), web-роуты с
+моком httpx (`test_web_routes.py`).

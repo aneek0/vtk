@@ -49,6 +49,30 @@
   </div>
   <button class="btn" onclick="convertLinks()" data-text-content="CONVERT">[ CONVERT ]</button>
 
+  <div class="sub-section" style="margin-top:1rem">
+    <div class="sub-label">
+      ► device headers
+      <label class="toggle-inline"><input type="checkbox" id="convertDeviceOn"> Send device headers</label>
+    </div>
+    <div class="row">
+      <div><label>User-Agent</label><input type="text" id="convertUa" placeholder="Happ/3.24.1"></div>
+      <div><label>HWID</label><input type="text" id="convertHwid" placeholder="device-id"></div>
+    </div>
+    <div class="row">
+      <div><label>OS</label>
+        <select id="convertOs"><option>android</option><option>ios</option></select>
+      </div>
+      <div><label>Version</label><input type="text" id="convertVer" placeholder="3.24.1"></div>
+    </div>
+    <div class="row">
+      <div><label>Model</label><input type="text" id="convertModel" placeholder="Pixel 8"></div>
+      <div><label>Locale</label><input type="text" id="convertLocale" placeholder="ru_RU"></div>
+    </div>
+    <div class="row">
+      <button class="btn btn-rnd" onclick="randomizeConvert()">[ RANDOM ]</button>
+    </div>
+  </div>
+
   <div id="convertHeadersSection" class="sub-section" style="display:none">
     <div class="sub-label">► subscription headers</div>
     <div id="convertHeaders" class="sub-headers-grid"></div>

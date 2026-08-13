@@ -47,6 +47,16 @@ class Settings:
     # Subscription output mode
     sub_passthrough: bool = False  # return proxy URL (happy-decoder.cc/p/<url>) instead of parsed config
 
+    # Proxy device fingerprint (for subscriptions fetched with device headers)
+    proxy_headers_on: bool = False  # send device headers only when explicitly enabled
+    proxy_os: str = "android"
+    proxy_ua: str = ""
+    proxy_ver: str = ""
+    proxy_model: str = ""
+    proxy_locale: str = ""
+    proxy_hwid: str = ""
+    proxy_hwid_on: bool = True  # include X-Hwid when proxy headers are sent
+
 
 def load_settings(path: str = "") -> Settings:
     path = path or DEFAULT_SETTINGS_PATH
@@ -81,4 +91,12 @@ def save_settings(settings: Settings, path: str = "") -> None:
     data["sub_user_agent"] = settings.sub_user_agent
     data["sub_hwid"] = settings.sub_hwid
     data["sub_passthrough"] = settings.sub_passthrough
+    data["proxy_headers_on"] = settings.proxy_headers_on
+    data["proxy_os"] = settings.proxy_os
+    data["proxy_ua"] = settings.proxy_ua
+    data["proxy_ver"] = settings.proxy_ver
+    data["proxy_model"] = settings.proxy_model
+    data["proxy_locale"] = settings.proxy_locale
+    data["proxy_hwid"] = settings.proxy_hwid
+    data["proxy_hwid_on"] = settings.proxy_hwid_on
     f.write_text(json.dumps(data, indent=2, ensure_ascii=False))

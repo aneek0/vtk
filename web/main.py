@@ -13,6 +13,7 @@ from web.routes.convert import router as convert_router
 from web.routes.proxy import router as proxy_router
 from web.routes.decrypt import router as decrypt_router
 from web.routes.frontend import router as frontend_router
+from web.routes.device import router as device_router
 
 logger = logging.getLogger("vtk.web")
 
@@ -37,6 +38,7 @@ app.include_router(frontend_router)
 app.include_router(convert_router)
 app.include_router(proxy_router)
 app.include_router(decrypt_router)
+app.include_router(device_router)
 
 
 # ── Health ──
