@@ -181,7 +181,7 @@ async function convertLinks(){
     ver:document.getElementById('convertVer').value.trim(),
     model:document.getElementById('convertModel').value.trim(),
     locale:document.getElementById('convertLocale').value.trim(),
-    hwid:document.getElementById('convertHwid').value.trim()
+    hwid:document.getElementById('convertHwidOn').checked?document.getElementById('convertHwid').value.trim():''
   };
   showSpinner('convertResult');
   try{
