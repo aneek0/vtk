@@ -128,58 +128,94 @@ def _block_pair_swap(s: str) -> str:
     return "".join(out) + s[full_len:]
 
 
-def _decrypt_crypt5(payload: str) -> str:
-    """Decrypt a crypt5 payload → plaintext URL."""
-    shuffled = _block_pair_swap(payload)
-    if len(shuffled) < 8:
-        raise ValueError("crypt5 payload too short")
+def _decrypt_crypt5_body(body: bytes, private_key, salted: bool) -> str:
+    """Decrypt a crypt5 body (after block-pair-unshuffle) given its RSA key.
 
-    marker = shuffled[:4] + shuffled[-4:]
-    body = shuffled[4:-4]
+    Supports both the legacy layout and the newer salted/XOR layout.
+    `body` is the bytes between the leading 4-byte and trailing 4-byte marker.
+    `salted` selects which header layout to parse.
+    """
     if len(body) < 13:
-        raise ValueError("crypt5 body too short")
+        raise ValueError("crypt5 body is too short")
 
-    nonce_str = body[:12]
-    rest = body[12:]
+    nonce = body[:12]
+    salt = None
+    length_start = 12
+    if salted:
+        if len(body) < 22:
+            raise ValueError("crypt5 salted header is too short")
+        salt = body[14:22]
+        length_start = 22
 
-    # Parse leading decimal digits for URL segment length
-    m = re.match(r"^(\d+)", rest)
-    if not m:
-        raise ValueError("crypt5 segment length missing")
-    segment_len = int(m.group(1))
-    packed = rest[m.end() :]
+    # Parse the leading decimal digit run as the URL segment length.
+    length_end = length_start
+    while length_end < len(body) and 48 <= body[length_end] <= 57:
+        length_end += 1
+    if length_end == length_start:
+        raise ValueError("crypt5 segment length is missing")
 
-    if len(packed) < 1 + segment_len:
-        raise ValueError("crypt5 segment truncated")
+    segment_len = int(body[length_start:length_end].decode("ascii"))
+    packed = body[length_end:]
+    if len(packed) == 0 or segment_len > len(packed) - 1:
+        raise ValueError("crypt5 segment is truncated")
 
-    url_b64 = packed[1 : 1 + segment_len]
-    enc_str = packed[1 + segment_len :]
+    url_b64 = packed[1 : 1 + segment_len].decode("ascii")
+    enc_str = packed[1 + segment_len :].decode("latin-1")
 
-    # Lookup RSA key by marker
-    keys = _load_crypt5_keys()
-    if marker not in keys:
-        raise ValueError(f"No RSA key found for marker: {marker}")
-
-    private_key = _load_pkcs8_key(keys[marker])
-
-    # RSA decrypt
+    # RSA PKCS#1 v1.5 decrypt
     enc_bytes = _b64_decode_urlsafe(enc_str)
     rsa_plaintext_bytes = _pkcs1_decrypt(private_key, enc_bytes)
 
-    # swapPairs → base64-decode → ChaCha20 key
+    # swapPairs → base64-decode → ChaCha20 key (must be 32 bytes)
     rsa_plaintext_str = rsa_plaintext_bytes.decode("latin-1")
-    chacha_key = _b64_decode_urlsafe(_swap_pairs(rsa_plaintext_str))
+    chacha_key = bytearray(_b64_decode_urlsafe(_swap_pairs(rsa_plaintext_str)))
+    if len(chacha_key) != 32:
+        raise ValueError(f"crypt5 key length unexpected: {len(chacha_key)}")
+
+    if salt:
+        for i in range(len(chacha_key)):
+            chacha_key[i] ^= salt[i % len(salt)]
 
     # ChaCha20-Poly1305 decrypt
-    nonce = nonce_str.encode("ascii")
-    aead = ChaCha20Poly1305(chacha_key)
     ciphertext = _b64_decode_urlsafe(url_b64)
+    aead = ChaCha20Poly1305(bytes(chacha_key))
     intermediate = aead.decrypt(nonce, ciphertext, None)
 
     # swapPairs → base64-decode → final URL
     intermediate_str = intermediate.decode("utf-8")
     final_bytes = _b64_decode_urlsafe(_swap_pairs(intermediate_str))
     return final_bytes.decode("utf-8")
+
+
+def _decrypt_crypt5(payload: str) -> str:
+    """Decrypt a crypt5 payload → plaintext URL.
+
+    Tries both the legacy and the newer salted/XOR layouts, preferring the
+    one implied by the body header (byte 12 is a digit → legacy).
+    """
+    shuffled = _block_pair_swap(payload)
+    if len(shuffled) < 8:
+        raise ValueError("crypt5 payload is too short")
+
+    marker = shuffled[:4] + shuffled[-4:]
+    body = shuffled[4:-4].encode("latin-1")
+
+    keys = _load_crypt5_keys()
+    if marker not in keys:
+        raise ValueError(f"No RSA key found for marker: {marker}")
+
+    private_key = _load_pkcs8_key(keys[marker])
+
+    # Newer links carry a salted/XOR header whose byte 12 is not a digit.
+    prefer_salted = len(body) > 12 and not (48 <= body[12] <= 57)
+
+    first_error: Exception | None = None
+    for salted in (prefer_salted, not prefer_salted):
+        try:
+            return _decrypt_crypt5_body(body, private_key, salted)
+        except Exception as e:  # noqa: BLE001 - try the other layout on any failure
+            first_error = first_error or e
+    raise first_error
 
 
 # ---------------------------------------------------------------------------
