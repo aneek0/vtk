@@ -82,3 +82,33 @@ def test_proxy_passthrough_regression(client):
     assert cap["url"] == "https://sub.example.com/x"
     assert cap["headers"]["User-Agent"] == "Happ/3.24.1"
     assert cap["headers"]["X-Device-Os"] == "Android"
+
+
+def test_convert_incy_link_end_to_end(client):
+    """An incy://crypt1 deep link should auto-decrypt, fetch the embedded
+    subscription (mocked), and convert to the requested format."""
+    import json
+    vectors = json.load(open("data/incy_vectors.json"))
+    link = vectors["links"][0]["link"]
+    c, cap = client
+    r = c.post("/api/convert", json={"input": link, "format": "txt"})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["ok"] is True
+    # The mock httpx client returns a vless link for any fetched URL.
+    assert "vless://" in d["result"]
+    assert cap.get("url") == vectors["links"][0]["url"]
+
+
+def test_convert_incy_plain_share_links(client):
+    """When the incy link embeds plain share links (not a URL), they convert
+    directly without a network fetch."""
+    try:
+        from incy_link_encoder import encryptLink
+    except Exception:
+        pytest.skip("official incy package not installed in test env")
+    share = "vless://11111111-2222-3333-4444-555555555555@example.com:443?encryption=none&security=tls#Test"
+    link = encryptLink(share, {"name": "t"})
+    r = client[0].post("/api/convert", json={"input": link, "format": "txt"})
+    assert r.status_code == 200, r.text
+    assert "vless://" in r.json()["result"]

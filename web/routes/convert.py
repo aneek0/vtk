@@ -123,6 +123,20 @@ async def api_convert(body: dict):
     if not text:
         return JSONResponse({"ok": False, "error": "Missing 'input' field"}, status_code=400)
 
+    # Auto-decrypt happ:// and incy:// links before processing
+    from core.happ import is_happ, decrypt_text as happ_decrypt_text
+    from core.incy import is_incy, decrypt_text as incy_decrypt_text
+    if is_happ(text):
+        try:
+            text = happ_decrypt_text(text)
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": f"Happ decrypt failed: {e}"}, status_code=400)
+    if is_incy(text):
+        try:
+            text = incy_decrypt_text(text)
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": f"Incy decrypt failed: {e}"}, status_code=400)
+
     fmt_str = body.get("format", "singbox")
     tag_prefix = body.get("tag_prefix", "")
     device = body.get("device") or {}
@@ -180,6 +194,21 @@ async def api_convert_get(
 
     s = load_settings()
     text = input.strip()
+
+    # Auto-decrypt happ:// and incy:// links before processing
+    from core.happ import is_happ, decrypt_text as happ_decrypt_text
+    from core.incy import is_incy, decrypt_text as incy_decrypt_text
+    if is_happ(text):
+        try:
+            text = happ_decrypt_text(text)
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": f"Happ decrypt failed: {e}"}, status_code=400)
+    if is_incy(text):
+        try:
+            text = incy_decrypt_text(text)
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": f"Incy decrypt failed: {e}"}, status_code=400)
+
     sub_headers = []
     device = {"os": os, "ua": ua, "ver": ver, "model": model, "locale": locale, "hwid": hwid}
     headers = _device_headers(device, device_on)
