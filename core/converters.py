@@ -51,14 +51,6 @@ class Format(str, Enum):
     XRAY = "xray"
 
 
-def _yaml_escape(s: str) -> str:
-    if not s:
-        return '""'
-    _YAML_SPECIAL = ':{}[]&*?|-><!%@`#,\'"\\\n'
-    if any(c in s for c in _YAML_SPECIAL):
-        return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
-    return s
-
 
 # ---------------------------------------------------------------------------
 # Protocol Adapters (TS project pattern)

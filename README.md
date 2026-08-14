@@ -35,7 +35,6 @@ uv sync --all-extras
 | Variable      | Description                                                    |
 |---------------|----------------------------------------------------------------|
 | `VTK_BOT_TOKEN` | Telegram bot token (for bot interface)                       |
-| `VTK_HAPP_KEY`  | Happy Decoder API key (optional, falls back to demo 5 req/min) |
 | `VTK_PROXY_BASE` | Base host for passthrough `/p/<params>/<url>` links (default `https://vtk.aneeko.qzz.io`) |
 
 ### CLI
@@ -58,7 +57,7 @@ export VTK_BOT_TOKEN=xxx
 uv run python -m bot.main
 ```
 
-Commands: `/start`, `/help`, `/settings`, `/proxy`, `/happkey`
+Commands: `/start`, `/help`, `/settings`, `/proxy`
 
 Features:
 - Auto-detects input type (link / subscription URL / config / TXT)
@@ -93,7 +92,7 @@ core/
   converters.py  — singbox / mihomo / flclash / txt output
   reverse.py     — config → share links (sing-box / mihomo YAML)
   settings.py    — per-input-type format defaults
-  happ.py        — Happy Decoder API integration
+  happ.py        — happ://crypt* offline decryptor (all RSA keys bundled)
 bot/             — Telegram bot (aiogram 3)
 web/             — FastAPI + HTML form + JSON API
 cli/             — CLI (typer)
@@ -147,7 +146,6 @@ output format: `sub_format`, `link_format`, `config_format`, `txt_format`.
   "txt_format": "mihomo",
   "tag_prefix": "",
   "timeout": 15,
-  "happ_key": "",
   "group_by_country": false
 }
 ```

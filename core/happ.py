@@ -12,10 +12,6 @@ from __future__ import annotations
 
 import logging
 import re
-import time
-import hashlib
-import os
-from urllib.parse import quote, urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -23,42 +19,8 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-DEMO_KEY = "hd_demo_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
-
 HAPP_RE = re.compile(r"happ://(crypt|crypt2|crypt3|crypt4|crypt5)/([^\s]+)")
 HAPP_ADD_RE = re.compile(r"happ://add/(.+)")
-
-# ---------------------------------------------------------------------------
-# Demo rate limiting (in-memory, per-key)
-# ---------------------------------------------------------------------------
-
-_RATE_LIMITS: dict[str, list[float]] = {}  # key -> [timestamps]
-_DEMO_LIMIT = 5  # per minute
-_PERSONAL_LIMIT = 10  # per minute
-_WINDOW = 60.0  # seconds
-
-
-def _check_rate_limit(api_key: str) -> tuple[bool, int]:
-    """Check rate limit for given key. Returns (allowed, remaining)."""
-    now = time.time()
-    limit = _DEMO_LIMIT if api_key == DEMO_KEY else _PERSONAL_LIMIT
-    
-    if api_key not in _RATE_LIMITS:
-        _RATE_LIMITS[api_key] = []
-    
-    # Clean old timestamps
-    _RATE_LIMITS[api_key] = [t for t in _RATE_LIMITS[api_key] if now - t < _WINDOW]
-    
-    if len(_RATE_LIMITS[api_key]) >= limit:
-        # Calculate retry_after
-        oldest = min(_RATE_LIMITS[api_key])
-        retry_after = int(_WINDOW - (now - oldest)) + 1
-        return False, retry_after
-    
-    _RATE_LIMITS[api_key].append(now)
-    remaining = limit - len(_RATE_LIMITS[api_key])
-    return True, remaining
-
 
 def _get_client_ip(request) -> str:
     """Extract real client IP from request, respecting X-Forwarded-For."""
@@ -86,7 +48,7 @@ def _passthrough(url: str) -> str | None:
 # Primary path: built-in Python decryptor (all 34 crypt5 keys bundled)
 # ---------------------------------------------------------------------------
 
-def _builtin_decrypt(url: str, api_key: str = "") -> str:
+def _builtin_decrypt(url: str) -> str:
     """Decrypt using the local Python implementation (no network needed).
 
     Raises ValueError if the format is unknown or decryption fails.
@@ -94,24 +56,6 @@ def _builtin_decrypt(url: str, api_key: str = "") -> str:
     """
     from core.happdecrypt import decrypt_link as _decrypt
     return _decrypt(url)
-
-
-def _get_key() -> str:
-    """Get API key from env or settings. (Not needed for built-in decryptor.)"""
-    import os
-
-    key = os.environ.get("VTK_HAPP_KEY", DEMO_KEY)
-    if key:
-        return key
-    try:
-        from core.settings import load_settings
-
-        s = load_settings()
-        if getattr(s, "happ_key", ""):
-            return s.happ_key
-    except Exception:
-        pass
-    return DEMO_KEY
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +67,7 @@ def is_happ(text: str) -> bool:
     return bool(HAPP_RE.search(text))
 
 
-def decrypt_link(url: str, api_key: str = "") -> str:
+def decrypt_link(url: str) -> str:
     """Decrypt a single happ:// link.
 
     Strategy:
@@ -142,7 +86,7 @@ def decrypt_link(url: str, api_key: str = "") -> str:
         raise RuntimeError(f"Decrypt failed: {e}") from e
 
 
-def decrypt_text(text: str, api_key: str = "") -> str:
+def decrypt_text(text: str) -> str:
     """Decrypt all happ:// links in text. Returns text with decrypted URLs."""
     # First, handle passthrough format
     text = HAPP_ADD_RE.sub(lambda m: m.group(1).strip(), text)
@@ -151,7 +95,7 @@ def decrypt_text(text: str, api_key: str = "") -> str:
     def _replace(m: re.Match) -> str:
         url = m.group(0)
         try:
-            return decrypt_link(url, api_key)
+            return decrypt_link(url)
         except Exception as e:
             logger.warning("Failed to decrypt %s: %s", url[:40], e)
             return url  # keep original on failure
@@ -159,7 +103,7 @@ def decrypt_text(text: str, api_key: str = "") -> str:
     return HAPP_RE.sub(_replace, text)
 
 
-async def fetch_sub_with_decrypt(url: str, api_key: str = "", timeout: int = 15) -> str:
+async def fetch_sub_with_decrypt(url: str, timeout: int = 15) -> str:
     """Fetch content from a URL (subscription or other).
 
     Fetches directly via httpx, then decrypts any happ:// links found in the text.
@@ -171,22 +115,5 @@ async def fetch_sub_with_decrypt(url: str, api_key: str = "", timeout: int = 15)
         resp.raise_for_status()
         text = resp.text
     # Decrypt any happ:// links found in the text
-    return decrypt_text(text, api_key)
+    return decrypt_text(text)
 
-
-# ---------------------------------------------------------------------------
-# Convenience for CLI / web
-# ---------------------------------------------------------------------------
-
-async def fetch_sub_with_decrypt_builtin(url: str, api_key: str = "", timeout: int = 15) -> str:
-    """Fetch subscription content, decrypt embedded happ:// links.
-
-    Uses built-in decryptor when possible, falls back to API.
-    """
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=False) as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        text = resp.text
-
-    # Decrypt any happ:// links found
-    return decrypt_text(text, api_key)

@@ -207,8 +207,7 @@ async def cmd_start(message: Message):
         "• Config file (sing-box JSON / mihomo YAML)\n"
         "• TXT file with links\n"
         "• happ://crypt* links (auto-decrypted)\n\n"
-        "/settings — configure output formats\n"
-        "/happkey — set Happy Decoder API key",
+        "/settings — configure output formats\n",
         parse_mode=ParseMode.HTML,
     )
 
@@ -227,22 +226,6 @@ async def cmd_help(message: Message):
         "  📱 Proxy — device headers for subscriptions (import from app-link)",
         parse_mode=ParseMode.HTML,
     )
-
-
-@router.message(Command("happkey"))
-async def cmd_happkey(message: Message):
-    """Set Happy Decoder API key. Usage: /happkey <key>"""
-    parts = message.text.split(maxsplit=1)
-    if len(parts) < 2:
-        s = load_settings()
-        current = s.happ_key or "demo (5 req/min)"
-        await message.reply(f"🔑 Current Happ key: <code>{current}</code>\n\nUsage: /happkey <your_key>", parse_mode=ParseMode.HTML)
-        return
-    key = parts[1].strip()
-    s = load_settings()
-    s.happ_key = key
-    save_settings(s)
-    await message.reply(f"✅ Happ key saved")
 
 
 @router.message(Command("settings"))
@@ -470,7 +453,7 @@ async def _process_input(message, text: str):
         )
 
     # Decrypt happ:// links before processing
-    from core.happ import is_happ, decrypt_text, _get_key
+    from core.happ import is_happ, decrypt_text
     if is_happ(text):
         try:
             text = decrypt_text(text)
@@ -637,7 +620,6 @@ async def _set_commands(bot: Bot):
         BotCommand(command="help", description="How to use"),
         BotCommand(command="settings", description="Configure output formats"),
         BotCommand(command="proxy", description="Configure proxy device headers"),
-        BotCommand(command="happkey", description="Set Happy Decoder API key"),
     ])
 
 

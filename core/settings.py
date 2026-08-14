@@ -35,14 +35,8 @@ class Settings:
     # Subscription fetch timeout
     timeout: int = 15
 
-    # Happy Decoder API key (empty = use demo key)
-    happ_key: str = ""
-
     # Group FlClash proxy-groups by country (from node name emoji)
     group_by_country: bool = False
-
-    sub_user_agent: str = ""  # deprecated, kept for compat
-    sub_hwid: str = ""  # deprecated, kept for compat
 
     # Subscription output mode
     sub_passthrough: bool = False  # return proxy URL (happy-decoder.cc/p/<url>) instead of parsed config
@@ -86,10 +80,7 @@ def save_settings(settings: Settings, path: str = "") -> None:
         data[key] = val.value if isinstance(val, Format) else val
     data["tag_prefix"] = settings.tag_prefix
     data["timeout"] = settings.timeout
-    data["happ_key"] = settings.happ_key
     data["group_by_country"] = settings.group_by_country
-    data["sub_user_agent"] = settings.sub_user_agent
-    data["sub_hwid"] = settings.sub_hwid
     data["sub_passthrough"] = settings.sub_passthrough
     data["proxy_headers_on"] = settings.proxy_headers_on
     data["proxy_os"] = settings.proxy_os

@@ -11,7 +11,7 @@
 - `vless://`, `vmess://`, `trojan://`, `ss://`, `ssr://`
 - `hysteria2://` — парсинг с sni/alpn/obfs
 - `socks://` — с аутентификацией и без
-- `happ://crypt*` — авто-дешифровка через [Happy Decoder API](https://happy-decoder.cc/api)
+- `happ://crypt*` — авто-дешифровка встроенным офлайн-дешифратором (все RSA-ключи вшиты)
 
 ## Форматы вывода
 
@@ -32,7 +32,6 @@ uv sync --all-extras
 | Переменная | Описание |
 |---|---|
 | `VTK_BOT_TOKEN` | Токен Telegram бота |
-| `VTK_HAPP_KEY` | API-ключ Happy Decoder (опционально, без него — демо 5 req/min) |
 
 ### CLI
 
@@ -53,7 +52,7 @@ export VTK_BOT_TOKEN=xxx
 uv run python -m bot.main
 ```
 
-Команды: `/start`, `/help`, `/settings`, `/happkey`
+Команды: `/start`, `/help`, `/settings`, `/proxy`
 
 Фичи:
 - Автоопределение типа входа (ссылка / URL подписки / конфиг / TXT)
@@ -82,7 +81,7 @@ core/      — общая бизнес-логика
   converters.py  — генерация форматов вывода
   reverse.py     — обратная конвертация (config → share links)
   settings.py    — настройки пользователя
-  happ.py        — интеграция с Happy Decoder API
+  happ.py        — happ://crypt* офлайн-дешифратор (все RSA-ключи вшиты)
 bot/       — Telegram bot (aiogram 3)
 web/       — FastAPI + HTML + JSON API
 cli/       — CLI (typer)
@@ -141,7 +140,7 @@ core/
   fingerprint.py — device fingerprint: parse/generate params, app-link parse, random, get_proxy_base
   reverse.py     — обратная конвертация (config → share links)
   settings.py    — настройки пользователя (включая proxy device)
-  happ.py        — интеграция с Happy Decoder API
+  happ.py        — happ://crypt* офлайн-дешифратор (все RSA-ключи вшиты)
 bot/       — Telegram bot (aiogram 3): /settings, /proxy, меню device, импорт app-link
 web/       — FastAPI: /convert, /proxy (/p/<params>/<url>), /api/device/random, HTML
 cli/       — CLI (typer)

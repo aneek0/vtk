@@ -162,12 +162,6 @@ class TestAPI:
         assert data["ok"] is True
         assert "crypt5_keys" in data
 
-    async def test_v1_keys(self, client):
-        r = await client.get("/api/v1/keys")
-        assert r.status_code == 200
-        data = r.json()
-        assert data["ok"] is True
-
 
 # ── Proxy endpoint ──
 
