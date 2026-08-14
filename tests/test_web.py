@@ -181,3 +181,12 @@ class TestProxy:
     async def test_proxy_no_url(self, client):
         r = await client.get("/p/android/")
         assert r.status_code == 400
+
+    async def test_proxy_rate_limit(self, client):
+        """Second immediate request from the same IP should be rate limited."""
+        target = "https://nonexistent.example.com/sub"
+        r1 = await client.get(f"/p/android/{target}")
+        assert r1.status_code in (400, 502)  # first request passes the limiter
+        r2 = await client.get(f"/p/android/{target}")
+        assert r2.status_code == 429
+        assert r2.headers.get("Retry-After") == "1"

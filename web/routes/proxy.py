@@ -1,6 +1,7 @@
 import base64 as _base64
 import httpx
 import re
+import time
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Query, Request
@@ -10,8 +11,34 @@ from core.fingerprint import (
     parse_device_params,
     generate_device_fingerprint,
 )
+from core.happ import _get_client_ip
 
 router = APIRouter()
+
+
+# ---------------------------------------------------------------------------
+# Per-client rate limit: at most 1 request per second (per IP), in-memory.
+# ---------------------------------------------------------------------------
+
+_PROXY_RATE_LIMITS: dict[str, float] = {}  # ip -> last allowed monotonic time
+_PROXY_MIN_INTERVAL = 1.0  # seconds between successive requests
+_PROXY_RATE_MAX_ENTRIES = 4096
+
+
+def _proxy_rate_limited(ip: str) -> bool:
+    """Return True if the request should be rejected (rate limited).
+
+    Enforces at most one request per ``_PROXY_MIN_INTERVAL`` seconds per IP.
+    The limiter state is bounded to avoid unbounded memory growth.
+    """
+    now = time.monotonic()
+    last = _PROXY_RATE_LIMITS.get(ip)
+    if last is not None and (now - last) < _PROXY_MIN_INTERVAL:
+        return True
+    _PROXY_RATE_LIMITS[ip] = now
+    if len(_PROXY_RATE_LIMITS) > _PROXY_RATE_MAX_ENTRIES:
+        _PROXY_RATE_LIMITS.clear()
+    return False
 
 
 @router.get("/p/{url:path}")
@@ -22,6 +49,14 @@ async def api_proxy(
     hwid_off: str = Query("", help="Set to '1' to disable HWID"),
     seed_random: str = Query("", help="Set to '1' for random seed"),
 ):
+    client_ip = _get_client_ip(request)
+    if _proxy_rate_limited(client_ip):
+        return JSONResponse(
+            {"error": "Rate limit exceeded. Maximum 1 request per second."},
+            status_code=429,
+            headers={"Retry-After": "1"},
+        )
+
     from core.happ import decrypt_text
     from core.logic import parse_subscription_text, ParseError
     from core.converters import convert, Format
