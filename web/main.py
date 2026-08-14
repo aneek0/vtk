@@ -2,7 +2,9 @@
 
 import os
 import time
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,7 +19,17 @@ from web.routes.device import router as device_router
 
 logger = logging.getLogger("vtk.web")
 
-app = FastAPI(title="VLESS Toolkit")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("VTK web started")
+    yield
+    logger.info("VTK web shutting down")
+    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+    for t in tasks:
+        t.cancel()
+
+
+app = FastAPI(title="VLESS Toolkit", lifespan=lifespan)
 
 # CORS
 app.add_middleware(
@@ -57,22 +69,6 @@ _start_time = time.time()
 async def global_exception_handler(request: Request, exc: Exception):
     logger.error("Unhandled error on %s: %s", request.url.path, exc, exc_info=True)
     return JSONResponse({"error": "internal server error"}, status_code=500)
-
-
-# ── Startup / shutdown ──
-
-@app.on_event("startup")
-async def startup():
-    logger.info("VTK web started")
-
-
-@app.on_event("shutdown")
-async def shutdown():
-    logger.info("VTK web shutting down")
-    import asyncio
-    tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-    for t in tasks:
-        t.cancel()
 
 
 if __name__ == "__main__":
