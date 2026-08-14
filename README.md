@@ -13,6 +13,7 @@ Three interfaces — Telegram bot, web (FastAPI), CLI — sharing one core.
 - `hysteria2://`
 - `socks://`
 - `happ://crypt*` (auto-decrypted)
+- `incy://crypt*` (auto-decrypted)
 
 ## Supported output formats
 
@@ -67,6 +68,7 @@ Features:
 - File upload support (documents processed same as text)
 - Rate limiting (3 msg/sec per user)
 - `happ://crypt*` auto-decryption
+- `incy://crypt*` auto-decryption
 
 ### Web
 
@@ -93,6 +95,7 @@ core/
   reverse.py     — config → share links (sing-box / mihomo YAML)
   settings.py    — per-input-type format defaults
   happ.py        — happ://crypt* offline decryptor (all RSA keys bundled)
+  incy.py        — incy://crypt* offline decryptor (AES-256-GCM, keymat bundled)
 bot/             — Telegram bot (aiogram 3)
 web/             — FastAPI + HTML form + JSON API
 cli/             — CLI (typer)

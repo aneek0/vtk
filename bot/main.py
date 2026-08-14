@@ -206,7 +206,8 @@ async def cmd_start(message: Message):
         "• Subscription URL\n"
         "• Config file (sing-box JSON / mihomo YAML)\n"
         "• TXT file with links\n"
-        "• happ://crypt* links (auto-decrypted)\n\n"
+        "• happ://crypt* links (auto-decrypted)\n"
+        "• incy://crypt* links (auto-decrypted)\n\n"
         "/settings — configure output formats\n",
         parse_mode=ParseMode.HTML,
     )
@@ -452,13 +453,20 @@ async def _process_input(message, text: str):
             parse_mode=ParseMode.HTML,
         )
 
-    # Decrypt happ:// links before processing
-    from core.happ import is_happ, decrypt_text
+    # Decrypt happ:// and incy:// links before processing
+    from core.happ import is_happ, decrypt_text as happ_decrypt_text
+    from core.incy import is_incy, decrypt_text as incy_decrypt_text
     if is_happ(text):
         try:
-            text = decrypt_text(text)
+            text = happ_decrypt_text(text)
         except Exception as e:
             await message.reply(f"❌ Happ decrypt failed: {e}")
+            return
+    if is_incy(text):
+        try:
+            text = incy_decrypt_text(text)
+        except Exception as e:
+            await message.reply(f"❌ Incy decrypt failed: {e}")
             return
 
     # Device headers (only when explicitly enabled)

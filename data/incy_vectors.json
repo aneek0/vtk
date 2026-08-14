@@ -1,0 +1,18 @@
+{
+  "keyFingerprint": "b6bf708471cc90043232967660aade86a50b4e57929db2e53c5fa34db624c08c",
+  "version": "1.0.0",
+  "links": [
+    {
+      "url": "https://sub.example-provider.com/abc123token",
+      "link": "incy://crypt1/tgQrNVmys7uGmzlPsg-lG3XbOWcsbNOLF-vsYid83JNt8aH0TnfE_CxQrqSE7t9c4wS0-gM-pi_vYHSR_UuUHSUePunW1FG0ppEQ9YPrSJzurCLxL78WQGbk4ByC68kTlXXJRaTuY4aysA"
+    },
+    {
+      "url": "https://vpn.another.net/subscription?token=deadbeef&exp=9999",
+      "link": "incy://crypt1/6YdpHgqhHO2cm7Y_mFZUX-5zKx1iotdsXdE4dnuNyaulGz2_rv3sDEWb89QiVTDgg1vib6hkTFmQc0zMvYCb_CXanxouuGe4Km2txLmmN5iP5PRdC37DxISrhlxv0OKt8-1CzxbcxyGXdpfzRVvZdNiv76NMVYJqQso"
+    },
+    {
+      "url": "https://incy.dev/api/v1/sub/xYz789",
+      "link": "incy://crypt1/wPOcB5VzN-CQJdgJhGCiy-Qa_oq5kQphxOr8DEitG-IMxyNja2cDPmfTM1T4vQa_iSX678uKIPhmtfTUgcIOzDQGWZQex3KzuNylNn67ryUQ6s213tt7tvbIsNqilxC2"
+    }
+  ]
+}

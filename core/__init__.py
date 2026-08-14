@@ -15,6 +15,7 @@ from .converters import (
 from .reverse import from_singbox, from_mihomo, from_config
 from .settings import Settings, load_settings, save_settings
 from .happ import is_happ, decrypt_link, decrypt_text, fetch_sub_with_decrypt
+from .incy import is_incy, decrypt_link as incy_decrypt_link, decrypt_text as incy_decrypt_text
 
 __all__ = [
     "Node",
@@ -33,4 +34,11 @@ __all__ = [
     "Settings",
     "load_settings",
     "save_settings",
+    "is_happ",
+    "decrypt_link",
+    "decrypt_text",
+    "fetch_sub_with_decrypt",
+    "is_incy",
+    "incy_decrypt_link",
+    "incy_decrypt_text",
 ]

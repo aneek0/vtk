@@ -12,6 +12,7 @@
 - `hysteria2://` — парсинг с sni/alpn/obfs
 - `socks://` — с аутентификацией и без
 - `happ://crypt*` — авто-дешифровка встроенным офлайн-дешифратором (все RSA-ключи вшиты)
+- `incy://crypt*` — авто-дешифровка встроенным офлайн-дешифратором (AES-256-GCM, keymat вшит)
 
 ## Форматы вывода
 
@@ -60,6 +61,7 @@ uv run python -m bot.main
 - Загрузка файлов (документы обрабатываются как текст)
 - Rate limit (3 msg/sec на пользователя)
 - Авто-дешифровка `happ://crypt*`
+- Авто-дешифровка `incy://crypt*`
 
 ### Веб
 
@@ -82,6 +84,7 @@ core/      — общая бизнес-логика
   reverse.py     — обратная конвертация (config → share links)
   settings.py    — настройки пользователя
   happ.py        — happ://crypt* офлайн-дешифратор (все RSA-ключи вшиты)
+  incy.py        — incy://crypt* офлайн-дешифратор (AES-256-GCM, keymat вшит)
 bot/       — Telegram bot (aiogram 3)
 web/       — FastAPI + HTML + JSON API
 cli/       — CLI (typer)
@@ -141,6 +144,7 @@ core/
   reverse.py     — обратная конвертация (config → share links)
   settings.py    — настройки пользователя (включая proxy device)
   happ.py        — happ://crypt* офлайн-дешифратор (все RSA-ключи вшиты)
+  incy.py        — incy://crypt* офлайн-дешифратор (AES-256-GCM, keymat вшит)
 bot/       — Telegram bot (aiogram 3): /settings, /proxy, меню device, импорт app-link
 web/       — FastAPI: /convert, /proxy (/p/<params>/<url>), /api/device/random, HTML
 cli/       — CLI (typer)

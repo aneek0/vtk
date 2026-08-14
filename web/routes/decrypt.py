@@ -55,3 +55,55 @@ async def api_happ_supported():
         "crypt5_keys": len(keys),
     }
 
+
+# ── Incy API endpoints (incy://crypt1 deep links) ──
+
+@router.post("/api/incy/decrypt")
+async def api_incy_decrypt(body: dict):
+    from core.incy import decrypt_link
+    url = body.get("url", "")
+    if not url:
+        return JSONResponse({"ok": False, "error": "Missing 'url' field"}, status_code=400)
+    try:
+        result = decrypt_link(url)
+        return {"ok": True, "decryptedUrl": result}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+@router.post("/api/incy/decrypt-text")
+async def api_incy_decrypt_text(body: dict):
+    from core.incy import decrypt_text
+    text = body.get("text", "")
+    if not text:
+        return JSONResponse({"ok": False, "error": "Missing 'text' field"}, status_code=400)
+    try:
+        result = decrypt_text(text)
+        return {"ok": True, "text": result, "decrypted": result != text}
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+@router.get("/api/incy/check")
+async def api_incy_check(url: str = ""):
+    from core.incy import is_incy, decrypt_link
+    try:
+        if is_incy(url):
+            decrypted = decrypt_link(url)
+            return {"ok": True, "is_incy": True, "decrypted": decrypted}
+        return {"ok": True, "is_incy": False, "original": url}
+    except Exception as e:
+        return {"ok": True, "is_incy": True, "error": str(e)}
+
+
+@router.get("/api/incy/supported")
+async def api_incy_supported():
+    from core.incy import KEY_FINGERPRINT, VERSION, SCHEME_VERSION
+    return {
+        "ok": True,
+        "scheme": SCHEME_VERSION,
+        "versions": ["crypt1"],
+        "keyFingerprint": KEY_FINGERPRINT,
+        "version": VERSION,
+    }
+
