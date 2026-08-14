@@ -289,9 +289,10 @@ class TestConverters:
         assert "proxies:" in result
         assert "mixed-port: 7890" in result
         assert "dns:" in result
-        assert "proxy-groups" not in result
-        assert "rules" not in result
-        assert "Quattro VPN" not in result
+        # Full FlClash config includes a select proxy-group
+        assert "proxy-groups" in result
+        assert "rules" in result
+        assert "🔰 PROXY" in result
 
     def test_flclash_dedup_names(self):
         link1 = "vless://uuid@host:443?encryption=none#Same"

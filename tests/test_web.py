@@ -15,6 +15,19 @@ async def client():
         yield c
 
 
+@pytest.fixture(autouse=True)
+def _reset_proxy_ratelimit():
+    """Clear the in-memory proxy rate limiter before each test.
+
+    The limiter is shared process-wide and keyed by client IP, so without a
+    reset a previous test in the same session can consume the single request
+    slot and make a later test see a spurious 429.
+    """
+    from web.routes.proxy import _PROXY_RATE_LIMITS
+    _PROXY_RATE_LIMITS.clear()
+    yield
+
+
 VLESS = "vless://info@104.26.14.71:2053?encryption=none&security=tls&type=ws&host=x.com&path=/"
 
 
@@ -178,6 +191,8 @@ class TestProxy:
 
     async def test_proxy_rate_limit(self, client):
         """Second immediate request from the same IP should be rate limited."""
+        from web.routes.proxy import _PROXY_RATE_LIMITS
+        _PROXY_RATE_LIMITS.clear()  # ensure a fresh 1-request window
         target = "https://nonexistent.example.com/sub"
         r1 = await client.get(f"/p/android/{target}")
         assert r1.status_code in (400, 502)  # first request passes the limiter
