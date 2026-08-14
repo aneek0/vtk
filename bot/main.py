@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import os
-import tempfile
 import time
 from collections import defaultdict
 
@@ -16,15 +15,13 @@ from aiogram.types import (
 from aiogram.filters import Command
 from aiogram.enums import ParseMode
 
-from core.logic import parse_link, parse_text_input, parse_subscription_text, fetch_subscription, extract_subscription_name, ParseError
-from core.converters import convert, Format, to_txt
-from core.reverse import from_config
-from core.settings import load_settings, save_settings
+from core.logic import process_input
+from core.converters import Format
+from core.settings import load_settings, save_settings, Settings
 from core.fingerprint import (
     parse_device_params, generate_device_fingerprint, to_params_string,
     parse_app_proxy_url, get_proxy_base, random_device,
 )
-from core.settings import Settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -453,21 +450,10 @@ async def _process_input(message, text: str):
             parse_mode=ParseMode.HTML,
         )
 
-    # Decrypt happ:// and incy:// links before processing
-    from core.happ import is_happ, decrypt_text as happ_decrypt_text
-    from core.incy import is_incy, decrypt_text as incy_decrypt_text
-    if is_happ(text):
-        try:
-            text = happ_decrypt_text(text)
-        except Exception as e:
-            await message.reply(f"❌ Happ decrypt failed: {e}")
-            return
-    if is_incy(text):
-        try:
-            text = incy_decrypt_text(text)
-        except Exception as e:
-            await message.reply(f"❌ Incy decrypt failed: {e}")
-            return
+    # Decryption is now centralized inside core.logic.process_input
+    # (via decrypt_input), so we no longer call happ/incy decrypt here.
+    # Input-type detection for an app-link was already forced to "sub"
+    # above; otherwise process_input detects on the decrypted text.
 
     # Device headers (only when explicitly enabled)
     device_headers = None
@@ -479,106 +465,52 @@ async def _process_input(message, text: str):
         )
         device_headers = fp
 
-    # Fetch subscription URL
+    # Single unified core path: decrypt -> detect -> fetch/parse -> convert
+    status_msg = None
     if input_type == "sub":
         status_msg = await message.reply("⏳ Fetching subscription...")
-        try:
-            import asyncio
-            from core.logic import fetch_subscription, extract_subscription_name
-            sub_url = text.strip()
-            content = await fetch_subscription(sub_url, timeout=s.timeout, headers=device_headers)
-            sub_name = extract_subscription_name(sub_url, content)
 
-            # Always parse nodes for conversion
-            nodes = parse_subscription_text(content)
-            if not nodes:
-                try:
-                    nodes = from_config(content)
-                except Exception:
-                    pass
+    res = await process_input(text, device_headers=device_headers)
 
-            # Passthrough: send proxy URL + raw JSON file
-            if s.sub_passthrough:
-                params_str = to_params_string({
-                    "os": s.proxy_os, "ver": s.proxy_ver, "model": s.proxy_model,
-                    "ua": s.proxy_ua, "locale": s.proxy_locale,
-                    "hwid": s.proxy_hwid if s.proxy_hwid_on else "",
-                })
-                proxy_url = f"{get_proxy_base()}/p/{params_str}/{sub_url}"
-                await message.reply(
-                    f"🔗 <b>Proxy link:</b>\n<code>{proxy_url}</code>\n\n"
-                    f"📋 Parsed {len(nodes)} nodes «{sub_name}»",
-                    parse_mode=ParseMode.HTML,
-                )
-                # Send raw proxy JSON as file
-                safe_name = "".join(c for c in sub_name if c.isalnum() or c in "._- ")[:50].strip() or "config"
-                raw_file = BufferedInputFile(content.encode(), filename=f"{safe_name}_raw.json")
-                await message.reply_document(raw_file, caption="📦 Raw proxy JSON (full config)")
-
-            if not nodes:
-                if not s.sub_passthrough:
-                    await status_msg.edit_text("❌ No nodes found (tried share links and config parsing)")
-                else:
-                    await status_msg.delete()
-                return
-
-            fmt = s.sub_format
-            await status_msg.edit_text(f"✅ {len(nodes)} nodes «{sub_name}», converting to {fmt.value}...")
-            result = convert(nodes, fmt, group_by_country=s.group_by_country)
-        except Exception as e:
-            await status_msg.edit_text(f"❌ Error: {e}")
-            return
-
-    # Config (JSON / YAML) → reverse to share links
-    elif input_type == "config":
-        try:
-            nodes = from_config(text)
-        except ParseError as e:
-            await message.reply(f"❌ {e}")
-            return
-        if not nodes:
-            await message.reply("❌ No convertible nodes found")
-            return
-        fmt = s.config_format
-        input_msg = f"✅ Config: {len(nodes)} nodes"
-
-    # Links or TXT
-    else:
-        nodes = parse_text_input(text)
-        nodes = [n for n in nodes if n.protocol != "error"]
-        if not nodes:
-            logger.warning(f"No valid nodes parsed. Input: {text[:100]}")
-            # Show what we got
-            all_nodes = parse_text_input(text)
-            errors = [n for n in all_nodes if n.protocol == "error"]
-            if errors:
-                logger.warning(f"Parse errors ({len(errors)}): {errors[0].name}")
-            await message.reply(f"❌ No valid proxy links found in: <pre>{text[:200]}</pre>",
-                                parse_mode=ParseMode.HTML)
-            return
-        # Check if it looks like a txt file (multiple share links)
-        lines = [l.strip() for l in text.strip().splitlines() if l.strip() and not l.startswith("#")]
-        share_prefixes = ("vless://", "vmess://", "trojan://", "ss://", "ssr://")
-        link_lines = [l for l in lines if any(l.startswith(p) for p in share_prefixes)]
-        if len(link_lines) > 1:
-            fmt = s.txt_format
+    if not res.get("ok"):
+        err = res.get("error", "Unknown error")
+        if status_msg:
+            await status_msg.edit_text(f"❌ {err}")
         else:
-            fmt = s.link_format
-        input_msg = f"✅ {len(nodes)} nodes"
-        logger.info(f"Parsed {len(nodes)} nodes, format={fmt.value}")
+            await message.reply(f"❌ {err}")
+        return
 
-    result = None
+    nodes = res["nodes"]
+    result = res["result"]
+    sub_name = res["sub_name"]
+    content = res["content"]
+    fmt = Format(res["format"])
 
-    # Convert (skip for passthrough — result already set)
-    if fmt is not None and result is None:
-        try:
-            result = convert(nodes, fmt, group_by_country=s.group_by_country)
-        except ParseError as e:
-            await message.reply(f"❌ {e}")
-            return
+    # Passthrough: send proxy URL + raw JSON file
+    if input_type == "sub" and s.sub_passthrough:
+        params_str = to_params_string({
+            "os": s.proxy_os, "ver": s.proxy_ver, "model": s.proxy_model,
+            "ua": s.proxy_ua, "locale": s.proxy_locale,
+            "hwid": s.proxy_hwid if s.proxy_hwid_on else "",
+        })
+        sub_url = text.strip()
+        proxy_url = f"{get_proxy_base()}/p/{params_str}/{sub_url}"
+        await message.reply(
+            f"🔗 <b>Proxy link:</b>\n<code>{proxy_url}</code>\n\n"
+            f"📋 Parsed {nodes} nodes «{sub_name}»",
+            parse_mode=ParseMode.HTML,
+        )
+        # Send raw proxy JSON as file
+        safe_name = "".join(c for c in sub_name if c.isalnum() or c in "._- ")[:50].strip() or "config"
+        raw_file = BufferedInputFile(content.encode(), filename=f"{safe_name}_raw.json")
+        await message.reply_document(raw_file, caption="📦 Raw proxy JSON (full config)")
+
+    if status_msg:
+        await status_msg.edit_text(f"✅ {nodes} nodes «{sub_name}», converting to {fmt.value}...")
 
     t_done = time.perf_counter()
     logger.info(f"Total processing: {(t_done - t_start)*1000:.0f}ms")
+    logger.info(f"Parsed {nodes} nodes, format={fmt.value}")
 
     ext = _fmt_ext(fmt) if fmt else "json"
     logger.info(f"Result: {len(result)} chars, ext={ext}")
@@ -594,7 +526,7 @@ async def _process_input(message, text: str):
     elif result.strip():
         await message.reply(f"<pre>{result}</pre>", parse_mode=ParseMode.HTML)
     else:
-        await message.reply(f"❌ Empty result — {len(nodes)} nodes parsed but nothing to output")
+        await message.reply(f"❌ Empty result — {nodes} nodes parsed but nothing to output")
 
 
 @router.message(F.document)

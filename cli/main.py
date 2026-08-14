@@ -21,6 +21,7 @@ from core.logic import (
     parse_link,
     parse_subscription_text,
     parse_text_input,
+    process_input,
 )
 from core.reverse import from_config as from_config_reverse
 from core.settings import load_settings, save_settings
@@ -72,73 +73,18 @@ def _convert_config(text: str, fmt: Format | None = None) -> tuple:
     return convert(nodes, fmt), len(nodes)
 
 
-def _decrypt_input(text: str) -> str:
-    """Auto-decrypt happ://crypt* and incy://crypt* links.
-
-    Returns the decrypted text (subscription URL or share links). For a
-    single encrypted link the inner URL is returned so it re-detects as a
-    subscription or share link; linked failures are left as-is.
-    """
-    from core.happ import is_happ, decrypt_text as happ_decrypt_text
-    from core.incy import is_incy, decrypt_text as incy_decrypt_text
-
-    stripped = text.strip()
-    # Single encrypted link -> decrypt to its inner payload
-    if is_happ(stripped) or is_incy(stripped):
-        if is_happ(stripped):
-            return happ_decrypt_text(stripped)
-        return incy_decrypt_text(stripped)
-    # Multiple/embedded links in text
-    if is_happ(text) or is_incy(text):
-        if is_happ(text):
-            text = happ_decrypt_text(text)
-        if is_incy(text):
-            text = incy_decrypt_text(text)
-    return text
-
-
 def do_convert(input_str: str, fmt_str: str = "", output: str = ""):
-    input_str = _decrypt_input(input_str)
-    input_type = _detect_input(input_str)
     chosen_fmt = Format(fmt_str) if fmt_str else None
 
-    if input_type == "sub":
-        async def _fetch():
-            from core.logic import fetch_subscription
-            return await fetch_subscription(input_str.strip())
-        content = asyncio.run(_fetch())
-        nodes = parse_subscription_text(content)
-        if not nodes:
-            nodes = from_config_reverse(content)
-        if not nodes:
-            print("❌ No nodes found in subscription", file=sys.stderr)
-            sys.exit(1)
-        if chosen_fmt is None:
-            chosen_fmt = load_settings().sub_format
-        result = convert(nodes, chosen_fmt)
-        print(f"✅ {len(nodes)} nodes from subscription")
+    res = asyncio.run(process_input(input_str, fmt=chosen_fmt))
 
-    elif input_type == "config":
-        nodes = from_config_reverse(input_str)
-        if not nodes:
-            print("❌ No convertible nodes found", file=sys.stderr)
-            sys.exit(1)
-        if chosen_fmt is None:
-            chosen_fmt = load_settings().config_format
-        result = convert(nodes, chosen_fmt)
-        print(f"✅ {len(nodes)} nodes from config")
+    if not res.get("ok"):
+        print(f"❌ {res.get('error', 'Processing failed')}", file=sys.stderr)
+        sys.exit(1)
 
-    else:
-        link_prefixes = ("vless://", "vmess://", "trojan://", "ss://", "ssr://", "hysteria2://", "socks://")
-        stripped = input_str.strip()
-        is_single = any(stripped.startswith(p) for p in link_prefixes) and "\n" not in stripped
-
-        if is_single:
-            result = _convert_link(stripped, chosen_fmt)
-            print("✅ 1 node")
-        else:
-            result, count = _convert_links(stripped, chosen_fmt)
-            print(f"✅ {count} nodes")
+    result = res["result"]
+    nodes = res["nodes"]
+    print(f"✅ {nodes} nodes")
 
     if output:
         with open(output, "w") as f:

@@ -729,7 +729,13 @@ def parse_text_input(text: str) -> list[Node]:
 
     Optimized: fix_link is called inside each parser, not redundantly here.
     For large inputs, processes line-by-line to minimize memory.
+
+    A protective ``decrypt_input`` runs first so any ``happ://`` / ``incy://``
+    links embedded in the text are decrypted inline (idempotent — plain text
+    passes through unchanged). This keeps direct callers safe from the class
+    of bug where encrypted inputs skipped the protocol parser.
     """
+    text = decrypt_input(text)
     nodes = []
     for line in text.strip().splitlines():
         line = line.strip()
@@ -973,7 +979,12 @@ def parse_subscription_text(text: str) -> list[Node]:
     """Parse already-fetched subscription text (may be base64).
 
     Falls back to config parsing (reverse.from_config) if no share-links found.
+
+    A protective ``decrypt_input`` runs first so an ``incy://`` / ``happ://``
+    wrapper embedded in the fetched body is stripped before parsing
+    (idempotent for plain content).
     """
+    text = decrypt_input(text)
     text = text.strip()
     if "\n" not in text and "\r" not in text:
         try:
@@ -991,3 +1002,228 @@ def parse_subscription_text(text: str) -> list[Node]:
         except Exception:
             pass
     return real_nodes
+
+
+# ---------------------------------------------------------------------------
+# Centralized decryption + unified input processing
+# ---------------------------------------------------------------------------
+
+def decrypt_input(raw: str) -> str:
+    """Decrypt all ``happ://`` / ``incy://`` links in a raw input string.
+
+    Pure offline wrapper over the bundled ``core.happ`` / ``core.incy``
+    decryptors. Per-link failures are swallowed (the original text is left
+    untouched for that link) so a single un-decodable link never kills the
+    whole batch. Already-plain text passes through unchanged (idempotent).
+    """
+    from core.happ import decrypt_text as happ_decrypt_text
+    from core.incy import decrypt_text as incy_decrypt_text
+
+    text = raw
+    for decryptor in (happ_decrypt_text, incy_decrypt_text):
+        try:
+            text = decryptor(text)
+        except Exception:
+            # Decryptor guards per-link already; a top-level failure here
+            # means nothing matched — leave text as-is.
+            pass
+    return text
+
+
+def _detect_input_type(text: str) -> str:
+    """Detect input type: 'sub', 'sub-wrap', 'config', 'link'.
+
+    Note: detection runs on the *decrypted* text, so callers should pass
+    already-decrypted input (``decrypt_input`` does this for the unified
+    ``process_input`` path).
+    """
+    text = text.strip()
+    if text.startswith(("http://", "https://")):
+        return "sub"
+    if text.startswith("{") or "proxies:" in text or text.startswith("- name:"):
+        return "config"
+    return "link"
+
+
+def _node_to_dict(node: Node) -> dict:
+    """Build the rich per-node dict used by the bot/web front-end.
+
+    Mirrors the previous web ``_node_to_dict`` so the front-end contract is
+    unchanged. Lives in core now so every platform reuses one definition.
+    """
+    proto = node.protocol
+    d = {"protocol": proto, "name": node.display_name, "address": node.address,
+         "port": node.port, "net": node.net or "raw"}
+    d["type"] = node.net or "raw"
+    try:
+        d["link"] = node.to_link()
+    except Exception:
+        d["link"] = ""
+    if node.reality_pbk:
+        d["reality"] = True
+        d["security"] = "reality"
+    elif node.tls:
+        d["tls"] = True
+        d["security"] = "tls"
+    else:
+        d["security"] = "none"
+    if proto == "vless":
+        d["encryption"] = node.extra.get("encryption", "none")
+    elif proto in ("ss", "ssr"):
+        d["encryption"] = node.ss_method or ""
+    if node.sni:
+        d["sni"] = node.sni
+    if node.alpn:
+        d["alpn"] = node.alpn
+    if node.fp:
+        d["fp"] = node.fp
+    if node.reality_pbk:
+        d["pbk"] = node.reality_pbk
+    if node.reality_sid:
+        d["sid"] = node.reality_sid
+    if node.uuid:
+        d["uuid"] = node.uuid
+    if node.path:
+        d["path"] = node.path
+    if node.host:
+        d["host"] = node.host
+    if node.flow:
+        d["flow"] = node.flow
+    if node.trojan_password:
+        d["password"] = node.trojan_password
+    if node.hysteria2_password:
+        d["password"] = node.hysteria2_password
+    if node.hysteria2_obfs:
+        d["obfs"] = node.hysteria2_obfs
+    elif node.obfs:
+        d["obfs"] = node.obfs
+    if proto == "ss":
+        if node.ss_method:
+            d["method"] = node.ss_method
+        if node.ss_password:
+            d["password"] = node.ss_password
+    if proto == "ssr":
+        if node.ss_method:
+            d["method"] = node.ss_method
+        if node.ss_password:
+            d["password"] = node.ss_password
+        if node.ssr_protocol:
+            d["ssr_protocol"] = node.ssr_protocol
+        if node.ssr_obfs:
+            d["ssr_obfs"] = node.ssr_obfs
+        if node.ssr_protocol_param:
+            d["ssr_protocol_param"] = node.ssr_protocol_param
+        if node.ssr_obfs_param:
+            d["ssr_obfs_param"] = node.ssr_obfs_param
+    if proto == "vmess":
+        d["aid"] = node.vmess_aid
+        d["scy"] = node.vmess_scy
+    if proto == "socks":
+        if node.socks_username:
+            d["socks_user"] = node.socks_username
+        if node.socks_password:
+            d["socks_pass"] = node.socks_password
+    return d
+
+
+async def process_input(raw: str, fmt=None, device_headers: dict | None = None,
+                        timeout: int | None = None, tag_prefix: str = "") -> dict:
+    """Single unified entry point used by bot, web and CLI.
+
+    Pipeline (all decryption centralized here):
+
+        raw -> decrypt_input -> detect (link/sub/config)
+            -> fetch/parse -> convert -> result dict
+
+    Args:
+        raw: Raw user input (links, subscription URL, config, or an
+            ``happ://`` / ``incy://`` encrypted wrapper).
+        fmt: Optional target ``Format``. When ``None`` resolved per input
+            type via ``load_settings()``.
+        device_headers: Optional request headers sent when fetching a
+            subscription (device fingerprint).
+        timeout: Optional subscription fetch timeout (seconds).
+
+    Returns:
+        dict: ``{"ok": True, "input_type": ..., "format": ..., "nodes": n,
+        "result": ..., "servers": [...], "sub_headers": [...],
+        "content": ..., "sub_name": ...}`` on success, or
+        ``{"ok": False, "error": ...}`` on failure.
+    """
+    from core.converters import Format, convert
+    from core.settings import load_settings
+
+    s = load_settings()
+    if timeout is None:
+        timeout = s.timeout
+
+    try:
+        raw = decrypt_input(raw)
+    except Exception as e:
+        return {"ok": False, "error": f"Decrypt failed: {e}"}
+
+    input_type = _detect_input_type(raw)
+    sub_name = ""
+    sub_headers = []
+    content = ""
+
+    if input_type == "sub":
+        try:
+            resp = await fetch_subscription(
+                raw.strip(), timeout=timeout, return_headers=True,
+                headers=device_headers,
+            )
+            content = resp.get("content", "")
+            sub_headers = resp.get("headers", [])
+            sub_name = extract_subscription_name(raw.strip(), content,
+                                                 dict(sub_headers))
+            nodes = parse_subscription_text(content)
+        except Exception as e:
+            return {"ok": False, "error": f"Subscription fetch failed: {e}"}
+    elif input_type == "config":
+        try:
+            from core.reverse import from_config
+            nodes = from_config(raw)
+        except ParseError as e:
+            return {"ok": False, "error": str(e)}
+        except Exception as e:
+            return {"ok": False, "error": f"Config parse failed: {e}"}
+    else:
+        nodes = parse_text_input(raw)
+        nodes = [n for n in nodes if n.protocol != "error"]
+
+    if not nodes:
+        return {"ok": False, "error": "No valid proxy links found."}
+
+    # Resolve output format
+    if fmt is None:
+        if input_type == "sub":
+            fmt = s.sub_format
+        elif input_type == "config":
+            fmt = s.config_format
+        else:
+            # Multiple share-links in one message -> txt format
+            lines = [l.strip() for l in raw.strip().splitlines()
+                     if l.strip() and not l.startswith("#")]
+            share_prefixes = ("vless://", "vmess://", "trojan://", "ss://", "ssr://")
+            link_lines = [l for l in lines
+                          if any(l.startswith(p) for p in share_prefixes)]
+            fmt = s.txt_format if len(link_lines) > 1 else s.link_format
+
+    try:
+        result = convert(nodes, fmt, tag_prefix=tag_prefix, group_by_country=s.group_by_country)
+    except ParseError as e:
+        return {"ok": False, "error": str(e)}
+
+    servers = [_node_to_dict(n) for n in nodes]
+    return {
+        "ok": True,
+        "input_type": input_type,
+        "format": fmt.value if isinstance(fmt, Format) else str(fmt),
+        "nodes": len(nodes),
+        "result": result,
+        "servers": servers,
+        "sub_headers": sub_headers,
+        "content": content,
+        "sub_name": sub_name,
+    }

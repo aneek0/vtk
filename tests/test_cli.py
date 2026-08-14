@@ -10,12 +10,15 @@ import cli.main as cli_main
 @pytest.fixture
 def fake_sub(monkeypatch):
     """Make do_convert's subscription fetch return a base64 subscription
-    payload (string), as real fetch_subscription does."""
+    payload, mirroring the real fetch_subscription when return_headers=True
+    (a dict with 'content' + 'headers')."""
     import base64
     payload = "vless://11111111-2222-3333-4444-555555555555@example.com:443?encryption=none&security=tls&type=ws#FakeSub"
     b64 = base64.b64encode(payload.encode()).decode()
 
-    async def _fake(url, timeout=15):
+    async def _fake(url, timeout=15, return_headers=False, headers=None):
+        if return_headers:
+            return {"content": b64, "headers": []}
         return b64
     monkeypatch.setattr("core.logic.fetch_subscription", _fake)
 
@@ -45,7 +48,8 @@ def test_cli_decrypt_incy_plain_share_link(capsys):
 
 def test_cli_decrypt_failure_warns(capsys):
     """A malformed encrypted link can't be decrypted; decrypt_text returns
-    it unchanged, so do_convert later fails as no valid proxy links."""
+    it unchanged, so process_input later fails as no valid proxy links."""
     bad = "incy://crypt1/!!!!not-valid!!!!"
-    with pytest.raises(Exception):
+    with pytest.raises(SystemExit) as exc:
         cli_main.do_convert(bad, "txt")
+    assert exc.value.code == 1
