@@ -72,7 +72,33 @@ def _convert_config(text: str, fmt: Format | None = None) -> tuple:
     return convert(nodes, fmt), len(nodes)
 
 
+def _decrypt_input(text: str) -> str:
+    """Auto-decrypt happ://crypt* and incy://crypt* links.
+
+    Returns the decrypted text (subscription URL or share links). For a
+    single encrypted link the inner URL is returned so it re-detects as a
+    subscription or share link; linked failures are left as-is.
+    """
+    from core.happ import is_happ, decrypt_text as happ_decrypt_text
+    from core.incy import is_incy, decrypt_text as incy_decrypt_text
+
+    stripped = text.strip()
+    # Single encrypted link -> decrypt to its inner payload
+    if is_happ(stripped) or is_incy(stripped):
+        if is_happ(stripped):
+            return happ_decrypt_text(stripped)
+        return incy_decrypt_text(stripped)
+    # Multiple/embedded links in text
+    if is_happ(text) or is_incy(text):
+        if is_happ(text):
+            text = happ_decrypt_text(text)
+        if is_incy(text):
+            text = incy_decrypt_text(text)
+    return text
+
+
 def do_convert(input_str: str, fmt_str: str = "", output: str = ""):
+    input_str = _decrypt_input(input_str)
     input_type = _detect_input(input_str)
     chosen_fmt = Format(fmt_str) if fmt_str else None
 
