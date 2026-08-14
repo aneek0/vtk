@@ -1166,11 +1166,13 @@ async def process_input(raw: str, fmt=None, device_headers: dict | None = None,
     sub_name = ""
     sub_headers = []
     content = ""
+    sub_url = ""
 
     if input_type == "sub":
         try:
+            sub_url = raw.strip()
             resp = await fetch_subscription(
-                raw.strip(), timeout=timeout, return_headers=True,
+                sub_url, timeout=timeout, return_headers=True,
                 headers=device_headers,
             )
             content = resp.get("content", "")
@@ -1226,4 +1228,5 @@ async def process_input(raw: str, fmt=None, device_headers: dict | None = None,
         "sub_headers": sub_headers,
         "content": content,
         "sub_name": sub_name,
+        "sub_url": sub_url,
     }

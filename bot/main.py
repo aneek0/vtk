@@ -422,8 +422,6 @@ async def _process_input(message, text: str):
     """Process text input and reply with converted output."""
     t_start = time.perf_counter()
     s = load_settings()
-    input_type = _detect_input(text)
-    sub_name = ""  # extracted subscription name for filename
 
     # Import device params from a pasted web app-link (…/p/<params>/<url>)
     app_link = parse_app_proxy_url(text)
@@ -444,7 +442,6 @@ async def _process_input(message, text: str):
             s.proxy_hwid = p["hwid"]
         save_settings(s)
         text = app_link["target_url"]
-        input_type = "sub"
         await message.reply(
             "📥 Imported device params from app-link. Headers ON.",
             parse_mode=ParseMode.HTML,
@@ -465,9 +462,11 @@ async def _process_input(message, text: str):
         )
         device_headers = fp
 
-    # Single unified core path: decrypt -> detect -> fetch/parse -> convert
+    # Single unified core path: decrypt -> detect -> fetch/parse -> convert.
+    # Detection runs on the *decrypted* text inside process_input, so
+    # incy://-wrapped subscriptions are correctly treated as a sub.
     status_msg = None
-    if input_type == "sub":
+    if _detect_input(decrypt_input(text)) == "sub":
         status_msg = await message.reply("⏳ Fetching subscription...")
 
     res = await process_input(text, device_headers=device_headers)
@@ -487,13 +486,13 @@ async def _process_input(message, text: str):
     fmt = Format(res["format"])
 
     # Passthrough: send proxy URL + raw JSON file
-    if input_type == "sub" and s.sub_passthrough:
+    if res["input_type"] == "sub" and s.sub_passthrough:
         params_str = to_params_string({
             "os": s.proxy_os, "ver": s.proxy_ver, "model": s.proxy_model,
             "ua": s.proxy_ua, "locale": s.proxy_locale,
             "hwid": s.proxy_hwid if s.proxy_hwid_on else "",
         })
-        sub_url = text.strip()
+        sub_url = res.get("sub_url") or text.strip()
         proxy_url = f"{get_proxy_base()}/p/{params_str}/{sub_url}"
         await message.reply(
             f"🔗 <b>Proxy link:</b>\n<code>{proxy_url}</code>\n\n"
