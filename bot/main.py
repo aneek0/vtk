@@ -15,7 +15,7 @@ from aiogram.types import (
 from aiogram.filters import Command
 from aiogram.enums import ParseMode
 
-from core.logic import process_input
+from core.logic import process_input, decrypt_input
 from core.converters import Format
 from core.settings import load_settings, save_settings, Settings
 from core.fingerprint import (
