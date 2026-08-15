@@ -31,6 +31,7 @@ class FakeMessage:
 
     async def reply(self, text=None, **kwargs):
         msg = FakeStatus(text)
+        msg.reply_markup = kwargs.get("reply_markup")
         self.replies.append(msg)
         # The first reply for a detected subscription becomes the live status
         # message that is later edited in place.
@@ -47,10 +48,12 @@ class FakeStatus:
     def __init__(self, text):
         self.text = text
         self.edited = None
+        self.reply_markup = None
 
     async def edit_text(self, text, **kwargs):
         self.edited = text
         self.text = text
+        self.reply_markup = kwargs.get("reply_markup")
         return self
 
 
@@ -434,5 +437,161 @@ def test_settings_commands_registered():
     cmd_callbacks = {h.callback for h in botmod.router.message.handlers}
     for fn in (botmod.cmd_start, botmod.cmd_help, botmod.cmd_settings, botmod.cmd_proxy):
         assert fn in cmd_callbacks
+
+
+# ---------------------------------------------------------------------------
+# Command + callback handlers (settings UI) and real Dispatcher dispatch
+# ---------------------------------------------------------------------------
+
+class FakeCallback:
+    def __init__(self, data):
+        self.data = data
+        self.answered = None
+        self.answer_calls = []
+        self.message = FakeStatus("")
+
+    async def answer(self, text=None, **kwargs):
+        self.answered = text
+        self.answer_calls.append(text)
+
+
+@pytest.fixture
+def _isolated_settings(tmp_path, monkeypatch):
+    """Point the real settings persistence at a temp file so handlers that
+    load/save actually persist and we can assert on it. Bind the bot's
+    load/save to the *real* core functions (not the autouse mock) so
+    persistence is exercised end-to-end."""
+    import core.settings as cs
+    p = tmp_path / "settings.json"
+    monkeypatch.setattr(cs, "DEFAULT_SETTINGS_PATH", str(p))
+    monkeypatch.setattr(botmod, "load_settings", cs.load_settings)
+    monkeypatch.setattr(botmod, "save_settings", cs.save_settings)
+    return p
+
+
+def test_cmd_start_and_help_reply(monkeypatch):
+    msg = FakeMessage()
+    asyncio.run(botmod.cmd_start(msg))
+    assert "VLESS Toolkit" in (msg.replies[0].text or "")
+    msg2 = FakeMessage()
+    asyncio.run(botmod.cmd_help(msg2))
+    assert "Usage" in (msg2.replies[0].text or "")
+
+
+def test_cmd_settings_shows_menu(monkeypatch):
+    msg = FakeMessage()
+    asyncio.run(botmod.cmd_settings(msg))
+    # Main settings keyboard rendered; reply_markup passed through.
+    assert msg.replies[0].reply_markup is not None
+
+
+def test_cb_section_shows_format_keyboard(_isolated_settings):
+    cb = FakeCallback(botmod.CB_LINK_FMT)
+    asyncio.run(botmod.cb_section(cb))
+    assert "Links" in (cb.message.text or "")
+    assert cb.message.reply_markup is not None
+    assert cb.answer_calls  # callback.answer() called
+
+
+def test_cb_set_format_persists(_isolated_settings):
+    """Selecting a format for a section persists to settings."""
+    from core.settings import load_settings
+    cb = FakeCallback(f"{botmod.CB_SUB_FMT}:flclash")
+    asyncio.run(botmod.cb_set_format(cb))
+    s = load_settings()
+    assert s.sub_format.value == "flclash"
+    assert "✅" in (cb.answered or "")
+
+
+def test_cb_set_format_invalid_format_propagates(_isolated_settings):
+    """An unknown format string raises inside Format() (handler has no
+    guard) — documented behavior, not a silent no-op. The malformed
+    (missing-colon) case answers and returns early instead."""
+    cb = FakeCallback(f"{botmod.CB_LINK_FMT}:notaformat")
+    with pytest.raises(ValueError):
+        asyncio.run(botmod.cb_set_format(cb))
+
+
+def test_cb_set_format_malformed_answers_and_returns(_isolated_settings):
+    cb = FakeCallback(f"{botmod.CB_LINK_FMT}")  # missing colon
+    asyncio.run(botmod.cb_set_format(cb))
+    assert cb.answer_calls
+
+
+def test_cb_toggle_passthrough_persists(_isolated_settings):
+    from core.settings import load_settings
+    before = load_settings().sub_passthrough
+    cb = FakeCallback("sub_passthrough")
+    asyncio.run(botmod.cb_toggle_passthrough(cb))
+    assert load_settings().sub_passthrough is not before
+
+
+def test_cb_proxy_toggles_and_back(_isolated_settings):
+    from core.settings import load_settings
+    cb = FakeCallback(botmod.CB_PROXY)
+    asyncio.run(botmod.cb_proxy_menu(cb))
+    assert "Proxy device" in (cb.message.text or "")
+    # Toggle headers on/off persists.
+    before = load_settings().proxy_headers_on
+    cb2 = FakeCallback("proxy_headers_on")
+    asyncio.run(botmod.cb_proxy_headers(cb2))
+    assert load_settings().proxy_headers_on is not before
+    # 'back' returns to main settings menu.
+    cb3 = FakeCallback("back")
+    asyncio.run(botmod.cb_back(cb3))
+    assert "Settings" in (cb3.message.text or "")
+
+
+def test_cb_proxy_random_persists_device(_isolated_settings):
+    from core.settings import load_settings
+    cb = FakeCallback("proxy_random")
+    asyncio.run(botmod.cb_proxy_random(cb))
+    s = load_settings()
+    assert s.proxy_os and s.proxy_ua  # randomized fields populated
+    assert cb.answer_calls and "🎲 Randomized" in cb.answer_calls
+
+
+def test_cmd_proxy_set_manual(_isolated_settings):
+    from core.settings import load_settings
+    msg = FakeMessage()
+    msg.text = "/proxy set android,ver=3.8.13,ua=Happ/3.26.0,hwid=abc"
+    asyncio.run(botmod.cmd_proxy(msg))
+    assert "saved" in (msg.replies[0].text or "")
+    s = load_settings()
+    assert s.proxy_os == "android"
+    assert s.proxy_ver == "3.8.13"
+    assert s.proxy_ua == "Happ/3.26.0"
+    assert s.proxy_hwid == "abc"
+
+
+def test_real_dispatcher_routes_text_to_handler(monkeypatch):
+    """Feed a real Update through aiogram's Dispatcher and confirm the text
+    handler runs (end-to-end wiring beyond unit mocks)."""
+    from aiogram import Bot, Dispatcher
+    from aiogram.types import Update
+
+    seen = {}
+
+    async def spy(message, text):
+        seen["text"] = text
+
+    monkeypatch.setattr(botmod, "_process_input", spy)
+
+    dp = Dispatcher()
+    dp.include_router(botmod.router)
+    # Build a minimal text-message Update.
+    update = Update(
+        update_id=1,
+        message={
+            "message_id": 1,
+            "from": {"id": 1, "is_bot": False, "first_name": "u"},
+            "chat": {"id": 1, "type": "private"},
+            "date": 0,
+            "text": "vless://a@b:443#n",
+        },
+    )
+    bot = Bot(token="123:fake")
+    asyncio.run(dp.feed_update(bot, update))
+    assert seen.get("text") == "vless://a@b:443#n"
 
 
