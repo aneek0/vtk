@@ -313,3 +313,126 @@ def test_real_integration_unparseable_input_reports_error(monkeypatch, fake_msg)
     asyncio.run(botmod._process_input(fake_msg, "this is not a proxy at all !!!"))
     assert any("❌" in (r.text or "") for r in fake_msg.replies)
 
+
+# ---------------------------------------------------------------------------
+# Real dispatch surface: handle_text / handle_document (the handlers the
+# regression actually broke) + router wiring
+# ---------------------------------------------------------------------------
+
+class FakeUser:
+    def __init__(self, uid=7):
+        self.id = uid
+
+
+class FakeBot:
+    def __init__(self, file_bytes=b""):
+        self._file_bytes = file_bytes
+        self.calls = []
+
+    async def get_file(self, file_id):
+        self.calls.append(("get_file", file_id))
+        return type("F", (), {"file_path": f"/dl/{file_id}"})()
+
+    async def download_file(self, path):
+        self.calls.append(("download_file", path))
+        data = self._file_bytes
+        return type("C", (), {"read": lambda self=None: data})()
+
+
+def _msg_with(text, uid=7):
+    m = FakeMessage()
+    m.text = text
+    m.from_user = FakeUser(uid)
+    m.bot = FakeBot()
+    return m
+
+
+def test_dispatch_handle_text_invokes_pipeline(monkeypatch):
+    """The real text handler must call _process_input (the regression path)."""
+    seen = {}
+
+    async def spy(message, text):
+        seen["text"] = text
+
+    monkeypatch.setattr(botmod, "_process_input", spy)
+    msg = _msg_with("vless://a@b:443#n")
+    asyncio.run(botmod.handle_text(msg))
+    assert seen.get("text") == "vless://a@b:443#n"
+
+
+def test_dispatch_handle_text_rate_limited(monkeypatch):
+    """After exceeding the rate limit, the handler replies with a throttle
+    message and does NOT reach _process_input."""
+    reached = {"process": False}
+    monkeypatch.setattr(botmod, "_user_timestamps", defaultdict(list))
+
+    async def spy(message, text):
+        reached["process"] = True
+
+    monkeypatch.setattr(botmod, "_process_input", spy)
+    uid = 99
+    # 3 allowed, 4th blocked.
+    for _ in range(3):
+        asyncio.run(botmod.handle_text(_msg_with("x", uid=uid)))
+    assert reached["process"] is True
+    reached["process"] = False
+    asyncio.run(botmod.handle_text(_msg_with("x", uid=uid)))
+    assert reached["process"] is False
+
+
+def test_dispatch_handle_document_decodes_and_routes(monkeypatch):
+    """Uploaded file content is read and handed to _process_input."""
+    seen = {}
+    content = "vless://feed@host:443#FromFile\n"
+
+    async def spy(message, text):
+        seen["text"] = text
+
+    monkeypatch.setattr(botmod, "_process_input", spy)
+    msg = FakeMessage()
+    msg.document = type("D", (), {"file_id": "FID123"})()
+    msg.bot = FakeBot(file_bytes=content.encode())
+    msg.from_user = FakeUser(5)
+    asyncio.run(botmod.handle_document(msg))
+    assert seen.get("text") == content
+
+
+def test_dispatch_handle_document_read_error_is_reported(monkeypatch):
+    """A file the bot cannot download yields a user-facing error, no crash."""
+
+    async def boom(message, text):
+        raise AssertionError("should not be called")
+
+    monkeypatch.setattr(botmod, "_process_input", boom)
+    msg = FakeMessage()
+    msg.document = type("D", (), {"file_id": "BAD"})()
+    msg.bot = FakeBot()
+    # Force download to fail.
+    async def _fail(path):
+        raise RuntimeError("download failed")
+
+    msg.bot.download_file = _fail
+    msg.from_user = FakeUser(5)
+    asyncio.run(botmod.handle_document(msg))
+    assert any("Error reading file" in (r.text or "") for r in msg.replies)
+
+
+def test_router_is_registered_and_callbacks_present():
+    """The bot router wires the message + callback handlers; importing the
+    module and inspecting the router confirms no wiring regressed."""
+    # The handler functions exist and are registered on the router.
+    assert botmod.handle_text in {h.callback for h in botmod.router.message.handlers}
+    assert botmod.handle_document in {h.callback for h in botmod.router.message.handlers}
+    # Callback handlers for settings sections are registered.
+    cb_callbacks = {h.callback for h in botmod.router.callback_query.handlers}
+    assert botmod.cb_section in cb_callbacks
+    assert botmod.cb_set_format in cb_callbacks
+
+
+def test_settings_commands_registered():
+    """/start /help /settings /proxy commands are wired on the router."""
+    cmd_callbacks = {h.callback for h in botmod.router.message.handlers}
+    for fn in (botmod.cmd_start, botmod.cmd_help, botmod.cmd_settings, botmod.cmd_proxy):
+        assert fn in cmd_callbacks
+
+
