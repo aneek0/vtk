@@ -254,3 +254,62 @@ def test_edge_passthrough_sends_proxy_url(monkeypatch, fake_msg):
     assert any("Proxy link" in (r.text or "") for r in fake_msg.replies)
     # Raw proxy JSON also attached as a document.
     assert any("Raw proxy JSON" in kw.get("caption", "") for _, kw in fake_msg.documents)
+
+
+# ---------------------------------------------------------------------------
+# Real integration: drive the actual core.logic.process_input (only HTTP mocked)
+# ---------------------------------------------------------------------------
+
+import base64 as _b64
+
+_LINK = "vless://11111111-2222-3333-4444-555555555555@1.2.3.4:443?encryption=none&security=tls&type=ws&path=%2Fwss#US-Node"
+
+
+def test_real_integration_single_link_through_core(monkeypatch, fake_msg):
+    """The full pipeline: decrypt -> detect -> parse -> convert to singbox,
+    with the *real* core.logic.process_input. HTTP is not involved here."""
+    # Use default settings (link_format=SINGBOX) so the result is deterministic
+    # regardless of any on-disk settings.json.
+    monkeypatch.setattr("core.settings.load_settings", lambda: Settings())
+    asyncio.run(botmod._process_input(fake_msg, _LINK))
+    # Result should be real sing-box JSON produced by the core converter.
+    pre = next(r for r in fake_msg.replies if (r.text or "").startswith("<pre>"))
+    body = pre.text.replace("<pre>", "").replace("</pre>", "")
+    assert '"outbounds"' in body
+    assert "US-Node" in body
+    assert not fake_msg.documents
+
+
+def test_real_integration_subscription_fetch_mocked(monkeypatch, fake_msg):
+    """Subscription path through the real core: fetch mocked at the HTTP layer
+    so we still exercise parsing/conversion/format selection end-to-end."""
+    # Default settings -> sub_format=MIHOMO (YAML), deterministic output.
+    monkeypatch.setattr("core.settings.load_settings", lambda: Settings())
+    payload = _b64.b64encode(f"vless://aaaa@9.9.9.9:443?encryption=none#SubNode".encode()).decode()
+
+    async def _fake_fetch(url, timeout=15, return_headers=False, headers=None):
+        if return_headers:
+            return {"content": payload, "headers": {}}
+        return payload
+
+    monkeypatch.setattr("core.logic.fetch_subscription", _fake_fetch)
+
+    asyncio.run(botmod._process_input(fake_msg, "https://sub.example.com/feed"))
+    # Status message must be shown (detected as sub) and later marked done.
+    assert fake_msg.status is not None
+    assert "✅" in (fake_msg.status.edited or "")
+    # Output (mihomo YAML) exceeds the inline threshold, so it is sent as a
+    # file; the parsed node must appear in that document.
+    file_contents = " ".join(
+        (d.data.decode() if hasattr(d, "data") else str(d)) for d, _ in fake_msg.documents
+    )
+    assert "SubNode" in file_contents
+
+
+def test_real_integration_unparseable_input_reports_error(monkeypatch, fake_msg):
+    """Garbage that core cannot parse must surface as a user-facing error, not
+    crash the handler."""
+    monkeypatch.setattr("core.settings.load_settings", lambda: Settings())
+    asyncio.run(botmod._process_input(fake_msg, "this is not a proxy at all !!!"))
+    assert any("❌" in (r.text or "") for r in fake_msg.replies)
+
