@@ -7,7 +7,7 @@ from datetime import datetime
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
-from urllib.parse import urlparse, parse_qs, unquote
+from urllib.parse import parse_qs, quote, urlencode, urlparse, unquote
 
 import httpx
 
@@ -172,7 +172,6 @@ class Node:
     def to_vless_link(self) -> str:
         if self.protocol != "vless":
             raise ParseError(f"Cannot convert {self.protocol} to vless link")
-        from urllib.parse import urlencode, quote
         params = {"encryption": "none", "type": self.net or "raw"}
         if self.tls:
             params["security"] = "tls"
@@ -202,7 +201,6 @@ class Node:
     def to_trojan_link(self) -> str:
         if self.protocol != "trojan":
             raise ParseError(f"Cannot convert {self.protocol} to trojan link")
-        from urllib.parse import urlencode, quote
         params: dict = {}
         if self.sni:
             params["sni"] = self.sni
@@ -223,7 +221,6 @@ class Node:
     def to_ss_link(self) -> str:
         if self.protocol != "ss":
             raise ParseError(f"Cannot convert {self.protocol} to ss link")
-        from urllib.parse import quote
         userinfo = _b64encode(f"{self.ss_method}:{self.ss_password}")
         link = f"ss://{userinfo}@{self.address}:{self.port}"
         if self.name:
@@ -233,7 +230,6 @@ class Node:
     def to_hysteria2_link(self) -> str:
         if self.protocol != "hysteria2":
             raise ParseError(f"Cannot convert {self.protocol} to hysteria2 link")
-        from urllib.parse import urlencode, quote
         params: dict = {}
         if self.sni:
             params["sni"] = self.sni
@@ -386,6 +382,32 @@ def fix_link(link: str) -> str:
 
     return link
 
+# Country detection tables (module-level: built once, not per call).
+_FLAG_MAP = {
+    "🇷🇺": "RU", "🇺🇸": "US", "🇩🇪": "DE", "🇳🇱": "NL",
+    "🇬🇧": "GB", "🇫🇷": "FR", "🇯🇵": "JP", "🇰🇷": "KR",
+    "🇸🇪": "SE", "🇫🇮": "FI", "🇵🇱": "PL", "🇪🇪": "EE",
+    "🇱🇻": "LV", "🇱🇹": "LT", "🇨🇭": "CH", "🇦🇿": "AZ",
+    "🇹🇷": "TR", "🇮🇱": "IL", "🇰🇿": "KZ", "🇲🇩": "MD",
+    "🇧🇬": "BG", "🇭🇺": "HU", "🇪🇸": "ES", "🇮🇪": "IE",
+    "🇩🇰": "DK", "🇭🇰": "HK", "🇮🇳": "IN", "🇨🇳": "CN",
+    "🇧🇷": "BR", "🇨🇦": "CA", "🇦🇺": "AU", "🇮🇹": "IT",
+}
+
+# Precompiled text patterns: "US |", "Germany", "Netherlands" etc.
+# Search flags (re.I) preserved from the original inline dict.
+_COUNTRY_TEXT_PATTERNS = [
+    (re.compile(r"^RU\b|(?<!\w)Russia(?!\w)", re.I), "RU"),
+    (re.compile(r"^US\b|(?<!\w)United States(?!\w)", re.I), "US"),
+    (re.compile(r"^DE\b|(?<!\w)Germany(?!\w)", re.I), "DE"),
+    (re.compile(r"^NL\b|(?<!\w)Netherlands(?!\w)", re.I), "NL"),
+    (re.compile(r"^GB\b|(?<!\w)United Kingdom(?!\w)|(?<!\w)UK(?!\w)", re.I), "GB"),
+    (re.compile(r"^FR\b|(?<!\w)France(?!\w)", re.I), "FR"),
+    (re.compile(r"^JP\b|(?<!\w)Japan(?!\w)", re.I), "JP"),
+    (re.compile(r"^FI\b|(?<!\w)Finland(?!\w)", re.I), "FI"),
+    (re.compile(r"^PL\b|(?<!\w)Poland(?!\w)", re.I), "PL"),
+    (re.compile(r"^SE\b|(?<!\w)Sweden(?!\w)", re.I), "SE"),
+]
 
 def extract_country(name: str) -> str:
     """Extract country from node name using emoji flags or text patterns.
@@ -395,37 +417,12 @@ def extract_country(name: str) -> str:
     if not name:
         return "Other"
 
-    # Common country emoji patterns at start of name
-    FLAG_MAP = {
-        "🇷🇺": "RU", "🇺🇸": "US", "🇩🇪": "DE", "🇳🇱": "NL",
-        "🇬🇧": "GB", "🇫🇷": "FR", "🇯🇵": "JP", "🇰🇷": "KR",
-        "🇸🇪": "SE", "🇫🇮": "FI", "🇵🇱": "PL", "🇪🇪": "EE",
-        "🇱🇻": "LV", "🇱🇹": "LT", "🇨🇭": "CH", "🇦🇿": "AZ",
-        "🇹🇷": "TR", "🇮🇱": "IL", "🇰🇿": "KZ", "🇲🇩": "MD",
-        "🇧🇬": "BG", "🇭🇺": "HU", "🇪🇸": "ES", "🇮🇪": "IE",
-        "🇩🇰": "DK", "🇭🇰": "HK", "🇮🇳": "IN", "🇨🇳": "CN",
-        "🇧🇷": "BR", "🇨🇦": "CA", "🇦🇺": "AU", "🇮🇹": "IT",
-    }
-
-    for flag, code in FLAG_MAP.items():
+    for flag, code in _FLAG_MAP.items():
         if name.startswith(flag):
             return code
 
-    # Try text patterns: "US |", "Germany", "Netherlands" etc.
-    text_patterns = {
-        r"^RU\b|(?<!\w)Russia(?!\w)": "RU",
-        r"^US\b|(?<!\w)United States(?!\w)": "US",
-        r"^DE\b|(?<!\w)Germany(?!\w)": "DE",
-        r"^NL\b|(?<!\w)Netherlands(?!\w)": "NL",
-        r"^GB\b|(?<!\w)United Kingdom(?!\w)|(?<!\w)UK(?!\w)": "GB",
-        r"^FR\b|(?<!\w)France(?!\w)": "FR",
-        r"^JP\b|(?<!\w)Japan(?!\w)": "JP",
-        r"^FI\b|(?<!\w)Finland(?!\w)": "FI",
-        r"^PL\b|(?<!\w)Poland(?!\w)": "PL",
-        r"^SE\b|(?<!\w)Sweden(?!\w)": "SE",
-    }
-    for pattern, code in text_patterns.items():
-        if re.search(pattern, name, re.I):
+    for pattern, code in _COUNTRY_TEXT_PATTERNS:
+        if pattern.search(name):
             return code
 
     return "Other"
@@ -741,9 +738,8 @@ def parse_text_input(text: str) -> list[Node]:
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-        # Additional safety: fix_link handles & -> ? normalization
-        # This catches cases where urlparse would fail on malformed ports
-        line = fix_link(line)
+        # fix_link normalization runs inside parse_vless/parse_trojan;
+        # other protocols need none.
         try:
             node = parse_link(line)
             node.validate()  # Lightweight validation (raises ParseError on critical issues)
@@ -757,7 +753,10 @@ def iter_parse_text(text: str):
     """Streaming parser — yields nodes one at a time (generator).
 
     Use for very large inputs to avoid loading all nodes into memory.
+    Runs the same protective ``decrypt_input`` pass as ``parse_text_input``
+    so encrypted ``happ://`` / ``incy://`` links are handled identically.
     """
+    text = decrypt_input(text)
     for line in text.strip().splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
@@ -774,14 +773,6 @@ def iter_parse_text(text: str):
 # Subscription fetching
 # ---------------------------------------------------------------------------
 
-_UA_LIST = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-    "Happ/3.21.1",
-    "v2rayNG/1.8.29",
-    "ClashMetaForAndroid/2.12.0",
-    "sing-box/1.9.0",
-    "V2Ray/5.0.0",
-]
 
 
 async def fetch_subscription(url: str, timeout: int = 15, return_headers: bool = False, headers: dict | None = None):
@@ -792,7 +783,6 @@ async def fetch_subscription(url: str, timeout: int = 15, return_headers: bool =
     `headers` (optional) are merged into the request (e.g. device fingerprint
     headers for proxied subscriptions).
     """
-    import httpx
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=False) as client:
         resp = await client.get(url, headers=headers or None)
         resp.raise_for_status()
@@ -820,7 +810,6 @@ async def fetch_subscription(url: str, timeout: int = 15, return_headers: bool =
                 return f"{gb:.1f}"
 
             def _format_userinfo(val: str) -> str:
-                import re
                 parts = {}
                 for m in re.finditer(r'(\w+)=([^;]+)', val):
                     parts[m.group(1)] = m.group(2)
@@ -866,7 +855,6 @@ async def fetch_subscription(url: str, timeout: int = 15, return_headers: bool =
             # Account (from content-disposition filename)
             cd = h.get("content-disposition", "")
             if "filename=" in cd:
-                import re
                 m = re.search(r'filename=([^;\s]+)', cd)
                 if m:
                     acc = m.group(1).strip().strip('"')
@@ -929,12 +917,12 @@ def extract_subscription_name(url: str, content: str, resp_headers: dict | None 
         cd = resp_headers.get("content-disposition", "")
         if "filename*" in cd:
             # RFC 5987: filename*=UTF-8''encoded_name
-            import re
+
             m = re.search(r"filename\*\s*=\s*UTF-8''(.+?)(?:;|$)", cd, re.I)
             if m:
                 return unquote(m.group(1))
         if "filename=" in cd:
-            import re
+
             m = re.search(r'filename\s*=\s*["\']?([^"\';\r\n]+)', cd, re.I)
             if m:
                 name = m.group(1).strip()
@@ -950,11 +938,9 @@ def extract_subscription_name(url: str, content: str, resp_headers: dict | None 
                 return title[:100]  # limit length
 
     # 3. URL path segments (skip file-like names)
-    from urllib.parse import urlparse
     parsed = urlparse(url)
     path_parts = [p for p in parsed.path.split("/") if p]
     # File-like patterns: digits.txt, 1.bin, config.yaml, etc.
-    import re
     _FILE_RE = re.compile(r'^(\d+\.(txt|bin|yaml|yml|json|conf|dat)|\w+\.(txt|bin|yaml|yml|json|conf|dat))$', re.I)
     # Try last segment first, then walk backwards
     for part in reversed(path_parts):

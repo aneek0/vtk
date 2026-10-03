@@ -30,6 +30,35 @@ try:
 except ImportError:
     _HAS_YAML = False
 
+# libyaml C emitter is ~4x faster than the pure-Python one on large proxy
+# lists; it always escapes non-BMP/emoji chars (\U0001F530) even with
+# allow_unicode=True, so we un-escape them back after dumping (a literal
+# backslash before a \U escape can't occur in its output: it is emitted as
+# a doubled backslash inside the same double-quoted scalar).
+try:
+    from yaml import CSafeDumper as _FastDumper
+    import re as _re
+    _UNICODE_ESCAPE_RE = _re.compile(r"\\U000([0-9A-Fa-f]{5})")
+    _HAS_C_YAML = True
+except ImportError:
+    _FastDumper = None
+    _HAS_C_YAML = False
+
+
+def _yaml_dump(config: dict) -> str:
+    """Dump YAML in the canonical vtk block style (fast path: libyaml)."""
+    if _HAS_C_YAML:
+        out = _yaml.dump(
+            config, Dumper=_FastDumper,
+            default_flow_style=False, allow_unicode=True, sort_keys=False,
+        )
+        return _UNICODE_ESCAPE_RE.sub(
+            lambda m: chr(int(m.group(1), 16)), out
+        )
+    return _yaml.dump(
+        config, default_flow_style=False, allow_unicode=True, sort_keys=False
+    )
+
 
 def _json_dumps(obj, **kwargs) -> str:
     if _HAS_ORJSON:
@@ -477,7 +506,7 @@ def to_mihomo(nodes: list[Node], tag_prefix: str = "") -> str:
         raise ParseError("No convertible nodes")
 
     config = {"proxies": proxy_dicts}
-    return _yaml.dump(config, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    return _yaml_dump(config)
 
 
 # ---------------------------------------------------------------------------
@@ -600,7 +629,7 @@ def to_flclash(nodes: list[Node], tag_prefix: str = "", group_by_country: bool =
         "rules": rules,
     }
 
-    return _yaml.dump(config, default_flow_style=False, allow_unicode=True, sort_keys=False)
+    return _yaml_dump(config)
 
 
 # ---------------------------------------------------------------------------

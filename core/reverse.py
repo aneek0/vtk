@@ -7,60 +7,6 @@ from typing import Optional
 from .logic import Node, ParseError
 
 
-def _parse_yaml_simple(text: str) -> dict:
-    """Minimal YAML parser for mihomo proxy lists (no PyYAML dependency)."""
-    # Very simple line-based parser for flat YAML structures
-    result = {}
-    current_list = None
-    current_item = None
-    indent_stack = [(0, result)]
-
-    for raw_line in text.splitlines():
-        stripped = raw_line.rstrip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        indent = len(raw_line) - len(raw_line.lstrip())
-
-        # Pop stack to find parent
-        while len(indent_stack) > 1 and indent_stack[-1][0] >= indent:
-            indent_stack.pop()
-
-        parent = indent_stack[-1][1]
-
-        if stripped.startswith("- "):
-            # List item
-            if current_list is None:
-                current_list = []
-                parent["_list"] = current_list
-            item = {"_value": stripped[2:].strip()}
-            current_list.append(item)
-            current_item = item
-            indent_stack.append((indent, item))
-        elif ":" in stripped:
-            key, _, val = stripped.partition(":")
-            key = key.strip()
-            val = val.strip().strip('"').strip("'")
-            if val == "":
-                # Could be a nested dict or list start
-                new_dict = {}
-                parent[key] = new_dict
-                if current_item is not None and "_value" in current_item:
-                    current_item[key] = new_dict
-                indent_stack.append((indent, new_dict))
-            else:
-                # Try type coercion
-                if val.lower() == "true":
-                    val = True
-                elif val.lower() == "false":
-                    val = False
-                elif val.isdigit():
-                    val = int(val)
-                elif val.lstrip("-").isdigit():
-                    val = int(val)
-                parent[key] = val
-
-    return result
-
 
 def _extract_yaml_proxies(text: str) -> list[dict]:
     """Extract proxy entries from mihomo YAML text."""

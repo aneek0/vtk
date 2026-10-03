@@ -102,16 +102,26 @@ def _pkcs1_decrypt(private_key, ciphertext: bytes) -> bytes:
         raise ValueError("RSA PKCS#1 v1.5 decryption failed")
     return result
 
+# Imported-key cache: CryptoRSA.import_key costs ~10-20 ms per RSA key
+# (key construction is pure CPU), so each distinct key is imported once.
+_key_cache: dict = {}
 
 def _load_pkcs1_key(b64_der: str):
-    """Load PKCS#1 RSA private key from base64-encoded DER."""
-    der = base64.b64decode(b64_der)
-    return CryptoRSA.import_key(der)
+    """Load PKCS#1 RSA private key from base64-encoded DER (cached)."""
+    key = _key_cache.get(b64_der)
+    if key is None:
+        key = CryptoRSA.import_key(base64.b64decode(b64_der))
+        _key_cache[b64_der] = key
+    return key
 
 
 def _load_pkcs8_key(b64_der: bytes):
-    """Load PKCS#8 RSA private key from raw DER bytes."""
-    return CryptoRSA.import_key(b64_der)
+    """Load PKCS#8 RSA private key from raw DER bytes (cached)."""
+    key = _key_cache.get(b64_der)
+    if key is None:
+        key = CryptoRSA.import_key(b64_der)
+        _key_cache[b64_der] = key
+    return key
 
 
 # ---------------------------------------------------------------------------

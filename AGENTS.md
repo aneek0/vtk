@@ -111,6 +111,21 @@ link2 = node.to_vless_link()  # round-trip
 ### Извлечение страны
 `extract_country(name)` определяет страну по флагу-эмодзи или текстовым паттернам. Используется в FlClash `group_by_country` для создания групп по странам.
 
+### Производительность
+Горячие пути оптимизированы (замеры на 5 000 ссылок, cpython 3.13):
+- YAML-вывод (mihomo/flclash) идёт через libyaml `CSafeDumper` (`converters._yaml_dump`)
+  с пост-обработкой `\U00XXXXXXX`-эскейпов обратно в литеральные эмодзи —
+  в ~4 раза быстрее чистого Python-эмиттера PyYAML; при отсутствии libyaml
+  автоматический фолбэк на чистый дампер.
+- `extract_country` — таблицы `_FLAG_MAP` / `_COUNTRY_TEXT_PATTERNS` на уровне
+  модуля (компилируются один раз).
+- RSA-ключи happ (crypt1–5) импортируются один раз и кэшируются
+  (`happdecrypt._key_cache`): импорт RSA-ключа ~10–30 мс, кэш убирает
+  повторные импорты при нескольких ссылках.
+- `parse_text_input` не вызывает `fix_link` отдельно: нормализация выполняется
+  внутри `parse_vless`/`parse_trojan`.
+- JSON-вывод (singbox/xray) — через orjson при наличии.
+
 ## Настройки
 
 Хранятся в `~/.config/vtk/settings.json`. Для каждого типа входа свой формат:
