@@ -1,34 +1,74 @@
 [project]
 name = "vtk"
-version = "0.1.0"
+version = "0.2.0"
 description = "VLESS Toolkit — parse, convert proxy links & subscriptions"
+readme = "README.md"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = [
-    "fastapi>=0.136.3",
     "httpx",
-    "orjson",
-    "python-multipart>=0.0.32",
-    "uvicorn>=0.48.0",
-    "pyyaml>=6.0",
     "pycryptodome>=3.23.0",
     "cryptography>=49.0.0",
-    "aiogram>=3",
-    "jinja2>=3.1.6",
-    "pytest-asyncio>=0.21",
+    "pyyaml>=6.0",
 ]
 
-[build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
-
 [project.optional-dependencies]
-dev = ["ruff", "pytest"]
+bot = [
+    "aiogram>=3",
+]
+web = [
+    "fastapi>=0.136.3",
+    "uvicorn>=0.48.0",
+    "python-multipart>=0.0.32",
+    "jinja2>=3.1.6",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9",
+    "pytest-asyncio>=0.26",
+    "ruff>=0.15",
+]
 
 [project.scripts]
 vtk = "cli.main:main"
 
+[build-system]
+requires = ["setuptools>=80"]
+build-backend = "setuptools.build_meta"
+
 [tool.setuptools.packages.find]
 include = ["core*", "cli*", "bot*", "web*"]
 
+# Bundled runtime data: RSA keymat (happ/incy decryptors) and test vectors.
+[tool.setuptools.package-data]
+core = ["../data/*.json"]
+web = ["templates/*.html", "static/*"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = ["data", "docs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "C4", "PERF"]
+ignore = [
+    "RUF001",  # Cyrillic/emoji strings in node names — intentional
+    "RUF002",  # docstrings legitimately contain en-dashes/units
+    "RUF003",  # same, in comments
+    "RUF100",  # noqa for non-enabled codes (BLE001) stays as documentation
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Long base64 RSA key blobs — lines must stay single-string-literal
+"core/happdecrypt.py" = ["E501"]
+# Tests: module-level fixtures opened once; occasionally long dict literals
+"tests/*" = ["SIM115", "E501", "E402"]
+
+[tool.ruff.format]
+quote-style = "double"

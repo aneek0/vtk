@@ -28,3 +28,7 @@ Thumbs.db
 # Project
 *.log
 graphify-out/
+
+# Build / caches
+/dist/
+.ruff_cache/
