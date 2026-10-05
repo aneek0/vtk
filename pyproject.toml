@@ -1,6 +1,6 @@
 [project]
 name = "vtk"
-version = "0.2.0"
+version = "1.0.0"
 description = "VLESS Toolkit — parse, convert proxy links & subscriptions"
 readme = "README.md"
 license = "GPL-3.0-or-later"
