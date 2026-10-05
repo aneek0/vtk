@@ -1,0 +1,14 @@
+.git
+.venv
+.env
+dist
+.ruff_cache
+__pycache__
+*.pyc
+.pytest_cache
+docs
+tests
+scripts
+.pre-commit-config.yaml
+Dockerfile
+.dockerignore
