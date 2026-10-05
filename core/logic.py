@@ -1,13 +1,12 @@
 """Core parsing: vless/vmess/ss/ssr/trojan/hysteria2/socks/happ links + subscriptions."""
 
 import base64
+import contextlib
 import json
 import re
-from datetime import datetime
-from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Optional
-from urllib.parse import parse_qs, quote, urlencode, urlparse, unquote
+from datetime import datetime
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
 import httpx
 
@@ -62,7 +61,8 @@ def _sanitize_params(qs: dict, known: set) -> dict:
             continue
         # Drop params containing known spam tokens
         lowered = val.lower()
-        if any(tok in lowered for tok in ("bia_telegram", "marambashi", "networld_vpn", "vpnserverrr", "you_are_beautiful")):
+        if any(tok in lowered for tok in ("bia_telegram", "marambashi", "networld_vpn",
+                                          "vpnserverrr", "you_are_beautiful")):
             continue
         clean[k] = [val]
     return clean
@@ -483,7 +483,7 @@ def parse_vmess(link: str) -> Node:
     try:
         data = json.loads(_b64decode(payload))
     except Exception as e:
-        raise ParseError(f"Invalid VMess JSON: {e}")
+        raise ParseError(f"Invalid VMess JSON: {e}") from e
     try:
         return Node(
             protocol="vmess",
@@ -501,7 +501,7 @@ def parse_vmess(link: str) -> Node:
             vmess_scy=data.get("scy", "auto"),
         )
     except (KeyError, ValueError) as e:
-        raise ParseError(f"Missing VMess field: {e}")
+        raise ParseError(f"Missing VMess field: {e}") from e
 
 
 def parse_trojan(link: str) -> Node:
@@ -560,10 +560,7 @@ def _fix_ss_2022_key(method: str, password: str) -> str:
         return password  # Already correct
 
     # Fix length: truncate or zero-pad
-    if len(key_bytes) > exp:
-        key_bytes = key_bytes[:exp]
-    else:
-        key_bytes = key_bytes + b"\x00" * (exp - len(key_bytes))
+    key_bytes = key_bytes[:exp] if len(key_bytes) > exp else key_bytes + b"\x00" * (exp - len(key_bytes))
 
     # Re-encode to base64 (standard, with padding)
     return base64.b64encode(key_bytes).decode()
@@ -605,7 +602,7 @@ def parse_ss(link: str) -> Node:
         try:
             decoded = _b64decode(payload)
         except Exception as e:
-            raise ParseError(f"Invalid SS base64: {e}")
+            raise ParseError(f"Invalid SS base64: {e}") from e
         m = re.match(r"^(.+?):(.+?)@(.+?):(\d+)", decoded)
         if not m:
             raise ParseError(f"Cannot parse legacy SS: {decoded}")
@@ -630,7 +627,7 @@ def parse_ssr(link: str) -> Node:
     try:
         decoded = _b64decode(payload)
     except Exception as e:
-        raise ParseError(f"Invalid SSR base64: {e}")
+        raise ParseError(f"Invalid SSR base64: {e}") from e
     main, _, param_str = decoded.partition("/?")
     parts = main.split(":")
     if len(parts) < 6:
@@ -973,20 +970,16 @@ def parse_subscription_text(text: str) -> list[Node]:
     text = decrypt_input(text)
     text = text.strip()
     if "\n" not in text and "\r" not in text:
-        try:
+        with contextlib.suppress(Exception):
             text = _b64decode(text)
-        except Exception:
-            pass
     nodes = parse_text_input(text)
     # Filter out error nodes — they indicate unparseable content
     real_nodes = [n for n in nodes if n.protocol != "error"]
     if not real_nodes:
         # Try direct JSON/YAML config parsing (Xray array, sing-box, mihomo)
-        try:
+        with contextlib.suppress(Exception):
             from core.reverse import from_config
             real_nodes = from_config(text)
-        except Exception:
-            pass
     return real_nodes
 
 
@@ -1007,12 +1000,10 @@ def decrypt_input(raw: str) -> str:
 
     text = raw
     for decryptor in (happ_decrypt_text, incy_decrypt_text):
-        try:
+        # Decryptor guards per-link already; a top-level failure here
+        # means nothing matched — leave text as-is.
+        with contextlib.suppress(Exception):  # noqa: PERF203 - two decryptors
             text = decryptor(text)
-        except Exception:
-            # Decryptor guards per-link already; a top-level failure here
-            # means nothing matched — leave text as-is.
-            pass
     return text
 
 
@@ -1191,11 +1182,11 @@ async def process_input(raw: str, fmt=None, device_headers: dict | None = None,
             fmt = s.config_format
         else:
             # Multiple share-links in one message -> txt format
-            lines = [l.strip() for l in raw.strip().splitlines()
-                     if l.strip() and not l.startswith("#")]
+            lines = [ln.strip() for ln in raw.strip().splitlines()
+                     if ln.strip() and not ln.startswith("#")]
             share_prefixes = ("vless://", "vmess://", "trojan://", "ss://", "ssr://")
-            link_lines = [l for l in lines
-                          if any(l.startswith(p) for p in share_prefixes)]
+            link_lines = [ln for ln in lines
+                          if any(ln.startswith(p) for p in share_prefixes)]
             fmt = s.txt_format if len(link_lines) > 1 else s.link_format
 
     try:

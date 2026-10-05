@@ -1,9 +1,9 @@
 """Web interface for VLESS toolkit — FastAPI."""
 
-import os
-import time
 import asyncio
 import logging
+import os
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -12,10 +12,10 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from web.routes.convert import router as convert_router
-from web.routes.proxy import router as proxy_router
 from web.routes.decrypt import router as decrypt_router
-from web.routes.frontend import router as frontend_router
 from web.routes.device import router as device_router
+from web.routes.frontend import router as frontend_router
+from web.routes.proxy import router as proxy_router
 
 logger = logging.getLogger("vtk.web")
 

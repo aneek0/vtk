@@ -66,7 +66,7 @@ def _load_keymat() -> dict[str, bytes]:
         return _keymat_cache
     path = os.path.join(os.path.dirname(__file__), "..", "data", "incy_keymat.json")
     path = os.path.abspath(path)
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         raw = json.load(f)
     _keymat_cache = {
         "a": base64.b64decode(raw["KEYMAT_A_B64"]),

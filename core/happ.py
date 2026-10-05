@@ -90,7 +90,7 @@ def decrypt_text(text: str) -> str:
     """Decrypt all happ:// links in text. Returns text with decrypted URLs."""
     # First, handle passthrough format
     text = HAPP_ADD_RE.sub(lambda m: m.group(1).strip(), text)
-    
+
     # Then decrypt crypt* links
     def _replace(m: re.Match) -> str:
         url = m.group(0)

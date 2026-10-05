@@ -6,22 +6,28 @@ import os
 import time
 from collections import defaultdict
 
-from aiogram import Bot, Dispatcher, Router, F
-from aiogram.types import (
-    Message, BufferedInputFile,
-    InlineKeyboardMarkup, InlineKeyboardButton,
-    CallbackQuery,
-)
-from aiogram.filters import Command
+from aiogram import Bot, Dispatcher, F, Router
 from aiogram.enums import ParseMode
-
-from core.logic import process_input, decrypt_input
-from core.converters import Format
-from core.settings import load_settings, save_settings, Settings
-from core.fingerprint import (
-    parse_device_params, generate_device_fingerprint, to_params_string,
-    parse_app_proxy_url, get_proxy_base, random_device,
+from aiogram.filters import Command
+from aiogram.types import (
+    BufferedInputFile,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
 )
+
+from core.converters import Format
+from core.fingerprint import (
+    generate_device_fingerprint,
+    get_proxy_base,
+    parse_app_proxy_url,
+    parse_device_params,
+    random_device,
+    to_params_string,
+)
+from core.logic import decrypt_input, process_input
+from core.settings import Settings, load_settings, save_settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -257,7 +263,7 @@ async def cmd_proxy(message: Message):
         if "hwid" in params:
             s.proxy_hwid = params["hwid"]
         save_settings(s)
-        await message.reply(f"✅ Proxy device params saved.")
+        await message.reply("✅ Proxy device params saved.")
         return
     text = (
         "📱 <b>Proxy device</b>\n\n"

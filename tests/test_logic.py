@@ -1,14 +1,23 @@
 """Tests for core logic — parsers, converters, edge cases."""
 
 import json
-import pytest
-from core.logic import (
-    Node, ParseError, fix_link, parse_vless, parse_vmess, parse_trojan,
-    parse_ss, parse_ssr, parse_hysteria2, parse_socks,
-    parse_text_input, parse_link, extract_country, iter_parse_text,
-)
-from core.converters import convert, Format
 
+import pytest
+
+from core.converters import Format, convert
+from core.logic import (
+    ParseError,
+    extract_country,
+    fix_link,
+    iter_parse_text,
+    parse_hysteria2,
+    parse_socks,
+    parse_ss,
+    parse_text_input,
+    parse_trojan,
+    parse_vless,
+    parse_vmess,
+)
 
 # ---------------------------------------------------------------------------
 # fix_link
@@ -148,7 +157,8 @@ class TestParseTrojan:
 
 class TestParseVmess:
     def test_basic(self):
-        import base64, json
+        import base64
+        import json
         payload = json.dumps({
             "v": "2", "ps": "Test", "add": "host", "port": "443",
             "id": "uuid-uuid-uuid-uuid-uuid-uuid-uuid-uuid",
@@ -318,7 +328,7 @@ class TestConverters:
         assert "inbounds" in data
         assert "burstObservatory" in data
         # Check proxy outbound (tag = node display_name)
-        proxy = [o for o in data["outbounds"] if o["protocol"] == "vless"][0]
+        proxy = next(o for o in data["outbounds"] if o["protocol"] == "vless")
         assert "vnext" in proxy["settings"]
         # Check direct/block
         tags = [o["tag"] for o in data["outbounds"]]
@@ -330,7 +340,7 @@ class TestConverters:
         nodes = [parse_vless(link)]
         result = convert(nodes, Format.XRAY)
         data = json.loads(result)
-        proxy = [o for o in data["outbounds"] if o["protocol"] == "vless"][0]
+        proxy = next(o for o in data["outbounds"] if o["protocol"] == "vless")
         assert proxy["streamSettings"]["security"] == "reality"
         assert "realitySettings" in proxy["streamSettings"]
 

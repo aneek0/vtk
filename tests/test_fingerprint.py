@@ -3,15 +3,13 @@
 Single source of truth shared by web (proxy + convert tabs) and the bot.
 """
 
-import os
 
-import pytest
 
 from core.fingerprint import (
-    RANDOM_AGENTS,
     ANDROID_MODELS,
     IOS_MODELS,
     LOCALES,
+    RANDOM_AGENTS,
     generate_device_fingerprint,
     get_proxy_base,
     parse_app_proxy_url,
@@ -19,7 +17,6 @@ from core.fingerprint import (
     random_device,
     to_params_string,
 )
-
 
 # ---------------------------------------------------------------------------
 # parse_device_params

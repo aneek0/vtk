@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
-from core.logic import process_input, ParseError
 from core.converters import Format, to_txt
-from core.reverse import from_config
 from core.fingerprint import generate_device_fingerprint
+from core.logic import ParseError, process_input
+from core.reverse import from_config
 
 router = APIRouter()
 
@@ -44,18 +44,16 @@ async def api_convert(body: dict):
                 "device": {"os": "android", "ua": "...", "ver": "...",
                            "model": "...", "locale": "...", "hwid": "..."}}
     """
-    from core.settings import load_settings
+
 
     text = (body.get("input") or "").strip()
     if not text:
         return JSONResponse({"ok": False, "error": "Missing 'input' field"}, status_code=400)
-
     fmt_str = body.get("format", "singbox")
     tag_prefix = body.get("tag_prefix", "")
     device = body.get("device") or {}
     device_on = bool(body.get("device_on", False))
     headers = _device_headers(device, device_on)
-    s = load_settings()
 
     # Resolve + validate the requested output format (None -> per-type default)
     try:
@@ -74,7 +72,10 @@ async def api_convert(body: dict):
     sub_headers = res["sub_headers"]
     servers = res["servers"]
     result = res["result"]
-    return {"ok": True, "format": res["format"], "nodes": res["nodes"], "result": result, "sub_headers": sub_headers, "servers": servers}
+    return {
+        "ok": True, "format": res["format"], "nodes": res["nodes"], "result": result,
+        "sub_headers": sub_headers, "servers": servers,
+    }
 
 
 @router.get("/api/convert")
@@ -91,11 +92,7 @@ async def api_convert_get(
     hwid: str = Query("", help="HWID"),
 ):
     """GET variant — for small inputs only (URL length limit ~2K)."""
-    from core.settings import load_settings
-
-    s = load_settings()
     text = input.strip()
-
     device = {"os": os, "ua": ua, "ver": ver, "model": model, "locale": locale, "hwid": hwid}
     headers = _device_headers(device, device_on)
 
@@ -115,7 +112,10 @@ async def api_convert_get(
     sub_headers = res["sub_headers"]
     servers = res["servers"]
     result = res["result"]
-    return {"ok": True, "format": res["format"], "nodes": res["nodes"], "result": result, "sub_headers": sub_headers, "servers": servers}
+    return {
+        "ok": True, "format": res["format"], "nodes": res["nodes"], "result": result,
+        "sub_headers": sub_headers, "servers": servers,
+    }
 
 
 @router.get("/api/check")

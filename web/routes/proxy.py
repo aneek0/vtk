@@ -1,15 +1,15 @@
-import base64 as _base64
-import httpx
+import base64
 import re
 import time
 from urllib.parse import unquote
 
+import httpx
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from core.fingerprint import (
-    parse_device_params,
     generate_device_fingerprint,
+    parse_device_params,
 )
 from core.happ import _get_client_ip
 
@@ -57,9 +57,9 @@ async def api_proxy(
             headers={"Retry-After": "1"},
         )
 
+    from core.converters import Format, convert
     from core.happ import decrypt_text
-    from core.logic import parse_subscription_text, ParseError
-    from core.converters import convert, Format
+    from core.logic import ParseError, parse_subscription_text
 
     raw_path = unquote(url)
     match = re.search(r"(https?://)", raw_path)
@@ -113,7 +113,11 @@ async def api_proxy(
     content = decrypt_text(content)
 
     stripped = content.strip()
-    if stripped and not stripped.startswith(("vless://", "vmess://", "trojan://", "ss://", "ssr://", "hysteria2://", "socks://", "http://", "https://", "{", "- name:", "#")):
+    _plain_prefixes = (
+        "vless://", "vmess://", "trojan://", "ss://", "ssr://", "hysteria2://", "socks://",
+        "http://", "https://", "{", "- name:", "#",
+    )
+    if stripped and not stripped.startswith(_plain_prefixes):
         try:
             decoded = base64.b64decode(stripped).decode("utf-8", errors="ignore")
             if decoded and len(decoded) > 10:
@@ -147,9 +151,10 @@ async def api_proxy(
 
 
 def _random_device() -> dict:
-    import random
     import hashlib
-    from core.fingerprint import RANDOM_AGENTS, IOS_MODELS, ANDROID_MODELS, LOCALES
+    import random
+
+    from core.fingerprint import ANDROID_MODELS, IOS_MODELS, LOCALES, RANDOM_AGENTS
 
     os_name = random.choice(["ios", "android"])
     return {

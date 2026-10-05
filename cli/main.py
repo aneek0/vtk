@@ -10,8 +10,6 @@ Usage:
 
 import argparse
 import asyncio
-import json
-import os
 import sys
 
 from core.converters import Format, convert, to_txt
@@ -57,9 +55,9 @@ def _convert_links(text: str, fmt: Format | None = None) -> tuple:
         raise ParseError("No valid proxy links found")
     if fmt is None:
         s = load_settings()
-        lines = [l.strip() for l in text.strip().splitlines() if l.strip() and not l.startswith("#")]
+        lines = [ln.strip() for ln in text.strip().splitlines() if ln.strip() and not ln.startswith("#")]
         share_prefixes = ("vless://", "vmess://", "trojan://", "ss://", "ssr://")
-        link_lines = [l for l in lines if any(l.startswith(p) for p in share_prefixes)]
+        link_lines = [ln for ln in lines if any(ln.startswith(p) for p in share_prefixes)]
         fmt = s.txt_format if len(link_lines) > 1 else s.link_format
     return convert(nodes, fmt), len(nodes)
 
@@ -460,7 +458,8 @@ def main():
     p_set.add_argument("value", help="Value")
 
     # If first arg is not a known subcommand and not a flag, treat as link
-    known_commands = {"convert", "interactive", "check", "parse", "sub", "batch", "extract", "settings", "-h", "--help", "--version"}
+    known_commands = {"convert", "interactive", "check", "parse", "sub", "batch", "extract",
+                      "settings", "-h", "--help", "--version"}
     if len(sys.argv) > 1 and sys.argv[1] not in known_commands and not sys.argv[1].startswith("-"):
         do_convert(sys.argv[1])
         return

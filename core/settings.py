@@ -2,11 +2,10 @@
 
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from .converters import Format
-
 
 DEFAULT_SETTINGS_PATH = os.path.expanduser("~/.config/vtk/settings.json")
 

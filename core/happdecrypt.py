@@ -223,7 +223,7 @@ def _decrypt_crypt5(payload: str) -> str:
     for salted in (prefer_salted, not prefer_salted):
         try:
             return _decrypt_crypt5_body(body, private_key, salted)
-        except Exception as e:  # noqa: BLE001 - try the other layout on any failure
+        except Exception as e:  # noqa: BLE001, PERF203 - try both layouts
             first_error = first_error or e
     raise first_error
 

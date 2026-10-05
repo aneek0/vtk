@@ -9,12 +9,11 @@ cases, and failure modes of the link handler.
 
 import asyncio
 from collections import defaultdict
-from unittest.mock import AsyncMock
 
 import pytest
 
 import bot.main as botmod
-from core.settings import Settings, save_settings
+from core.settings import Settings
 
 
 class FakeMessage:
@@ -182,7 +181,7 @@ def test_failure_sub_error_edits_status(monkeypatch, fake_msg):
     monkeypatch.setattr(botmod, "process_input", fake_process)
     asyncio.run(botmod._process_input(fake_msg, "https://sub.example.com/x"))
     assert fake_msg.status is not None
-    assert "❌ fetch failed" == (fake_msg.status.edited or "").strip()
+    assert (fake_msg.status.edited or "").strip() == "❌ fetch failed"
 
 
 # ---------------------------------------------------------------------------
@@ -288,7 +287,7 @@ def test_real_integration_subscription_fetch_mocked(monkeypatch, fake_msg):
     so we still exercise parsing/conversion/format selection end-to-end."""
     # Default settings -> sub_format=MIHOMO (YAML), deterministic output.
     monkeypatch.setattr("core.settings.load_settings", lambda: Settings())
-    payload = _b64.b64encode(f"vless://aaaa@9.9.9.9:443?encryption=none#SubNode".encode()).decode()
+    payload = _b64.b64encode(b"vless://aaaa@9.9.9.9:443?encryption=none#SubNode").decode()
 
     async def _fake_fetch(url, timeout=15, return_headers=False, headers=None):
         if return_headers:

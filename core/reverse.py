@@ -1,11 +1,8 @@
 """Reverse converters: sing-box JSON / mihomo YAML → share links."""
 
 import json
-import re
-from typing import Optional
 
 from .logic import Node, ParseError
-
 
 
 def _extract_yaml_proxies(text: str) -> list[dict]:
@@ -137,7 +134,7 @@ def _extract_yaml_proxies(text: str) -> list[dict]:
     return proxies
 
 
-def _yaml_proxy_to_node(p: dict) -> Optional[Node]:
+def _yaml_proxy_to_node(p: dict) -> Node | None:
     """Convert a parsed mihomo proxy dict to Node."""
     proto = p.get("type", "")
     if not proto or proto == "ssr":
@@ -210,7 +207,7 @@ def _yaml_proxy_to_node(p: dict) -> Optional[Node]:
     return node
 
 
-def _singbox_outbound_to_node(o: dict) -> Optional[Node]:
+def _singbox_outbound_to_node(o: dict) -> Node | None:
     """Convert a sing-box or Xray outbound entry to Node."""
     proto = o.get("type", "") or o.get("protocol", "")
     if not proto or proto in ("ssr", "selector", "urltest", "direct", "block", "dns", "freedom", "blackhole"):
@@ -271,7 +268,7 @@ def _singbox_outbound_to_node(o: dict) -> Optional[Node]:
     return node
 
 
-def _xray_outbound_to_node(o: dict, proto: str) -> Optional[Node]:
+def _xray_outbound_to_node(o: dict, proto: str) -> Node | None:
     """Convert Xray-format outbound to Node."""
     if proto in ("freedom", "blackhole", "direct", "block", "dns"):
         return None
@@ -295,7 +292,6 @@ def _xray_outbound_to_node(o: dict, proto: str) -> Optional[Node]:
         if users:
             uuid = users[0].get("id", "")
             flow = users[0].get("flow", "")
-            encryption = users[0].get("encryption", "")
 
     servers = settings.get("servers", [])
     if servers:
@@ -380,7 +376,7 @@ def from_singbox(json_text: str) -> list[Node]:
     try:
         data = json.loads(json_text)
     except json.JSONDecodeError as e:
-        raise ParseError(f"Invalid JSON: {e}")
+        raise ParseError(f"Invalid JSON: {e}") from e
 
     outbounds = data.get("outbounds", [])
     if not outbounds:

@@ -9,11 +9,8 @@ Architecture (inspired by sunway910/clashconverter):
 """
 
 import base64
-from abc import ABC, abstractmethod
-from collections import defaultdict
+from abc import ABC
 from enum import Enum
-from typing import Optional
-from urllib.parse import urlencode, quote
 
 from .logic import Node, ParseError, extract_country
 
@@ -36,8 +33,9 @@ except ImportError:
 # backslash before a \U escape can't occur in its output: it is emitted as
 # a doubled backslash inside the same double-quoted scalar).
 try:
-    from yaml import CSafeDumper as _FastDumper
     import re as _re
+
+    from yaml import CSafeDumper as _FastDumper
     _UNICODE_ESCAPE_RE = _re.compile(r"\\U000([0-9A-Fa-f]{5})")
     _HAS_C_YAML = True
 except ImportError:
@@ -85,7 +83,7 @@ class Format(str, Enum):
 # Protocol Adapters (TS project pattern)
 # ---------------------------------------------------------------------------
 
-class ProtocolAdapter(ABC):
+class ProtocolAdapter(ABC):  # noqa: B024 - marker base; subclasses fill in methods
     """Base adapter — each protocol implements format-specific generation."""
 
     protocol: str = ""
@@ -186,7 +184,18 @@ class VMessAdapter(ProtocolAdapter):
         scy = node.vmess_scy
         net = node.net
         tls = "tls" if node.tls else ""
-        json_str = f'{{"v":"2","ps":"{ps}","add":"{addr}","port":{port},"id":"{uuid}","aid":{aid},"scy":"{scy}","net":"{net}","tls":"{tls}"}}'
+        vmess_obj = {
+            "v": "2",
+            "ps": ps,
+            "add": addr,
+            "port": port,
+            "id": uuid,
+            "aid": aid,
+            "scy": scy,
+            "net": net,
+            "tls": tls,
+        }
+        json_str = _json_dumps(vmess_obj).replace("\n", "")
         encoded = base64.b64encode(json_str.encode()).decode()
         return f"vmess://{encoded}"
 
@@ -337,7 +346,7 @@ def _register_adapters():
         _ADAPTERS[a.protocol] = a
 
 
-def get_adapter(protocol: str) -> Optional[ProtocolAdapter]:
+def get_adapter(protocol: str) -> ProtocolAdapter | None:
     """Get adapter for a protocol type."""
     _register_adapters()
     return _ADAPTERS.get(protocol)
@@ -493,7 +502,7 @@ def to_mihomo(nodes: list[Node], tag_prefix: str = "") -> str:
 
     names = []
     proxy_dicts = []
-    for i, node in enumerate(nodes):
+    for node in nodes:
         if node.protocol == "ssr":
             continue
         obj = _node_to_dict(node, "mihomo")
@@ -587,7 +596,7 @@ def to_flclash(nodes: list[Node], tag_prefix: str = "", group_by_country: bool =
         proxy_groups.append({
             "name": "🔰 PROXY",
             "type": "select",
-            "proxies": ["DIRECT", "REJECT"] + names,
+            "proxies": ["DIRECT", "REJECT", *names],
         })
 
     # Basic rules
@@ -745,7 +754,7 @@ def to_xray(nodes: list[Node], tag_prefix: str = "") -> str:
     return _json_dumps(config)
 
 
-def _node_to_xray_outbound(node: Node, tag: str) -> Optional[dict]:
+def _node_to_xray_outbound(node: Node, tag: str) -> dict | None:
     """Convert a single Node to an Xray outbound config."""
     if node.protocol == "vless":
         settings = {

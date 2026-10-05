@@ -44,7 +44,6 @@ def test_decrypt_input_swallows_per_link_errors():
 
 def test_process_input_incy_share(incy_vectors):
     """An incy link wrapping plain share links converts without any network."""
-    link = incy_vectors["links"][0]["link"]
     # The wrapped payload in the fixture is a subscription URL, so use a
     # hand-built plain-share incy payload path via decrypt_text instead:
     from core.incy import decrypt_text

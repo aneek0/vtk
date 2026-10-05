@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request
+from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 router = APIRouter()
@@ -34,7 +34,7 @@ async def api_happ_decrypt_text(body: dict):
 
 @router.get("/api/happ/check")
 async def api_happ_check(url: str = ""):
-    from core.happ import is_happ, decrypt_link
+    from core.happ import decrypt_link, is_happ
     try:
         if is_happ(url):
             decrypted = decrypt_link(url)
@@ -46,7 +46,7 @@ async def api_happ_check(url: str = ""):
 
 @router.get("/api/happ/supported")
 async def api_happ_supported():
-    from core.happdecrypt import _load_crypt5_keys, _PKCS1_KEYS_B64
+    from core.happdecrypt import _PKCS1_KEYS_B64, _load_crypt5_keys
     keys = _load_crypt5_keys()
     return {
         "ok": True,
@@ -86,7 +86,7 @@ async def api_incy_decrypt_text(body: dict):
 
 @router.get("/api/incy/check")
 async def api_incy_check(url: str = ""):
-    from core.incy import is_incy, decrypt_link
+    from core.incy import decrypt_link, is_incy
     try:
         if is_incy(url):
             decrypted = decrypt_link(url)
@@ -98,7 +98,7 @@ async def api_incy_check(url: str = ""):
 
 @router.get("/api/incy/supported")
 async def api_incy_supported():
-    from core.incy import KEY_FINGERPRINT, VERSION, SCHEME_VERSION
+    from core.incy import KEY_FINGERPRINT, SCHEME_VERSION, VERSION
     return {
         "ok": True,
         "scheme": SCHEME_VERSION,
