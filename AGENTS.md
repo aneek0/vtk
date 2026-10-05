@@ -67,7 +67,7 @@ uv run python -m bot.main
 
 ```bash
 uv run python -m web.main
-# http://localhost:8080
+# http://localhost:9000
 ```
 
 HTML-форма + JSON API:
@@ -168,9 +168,23 @@ cli/       — CLI (typer)
 ## Тесты
 
 ```bash
-pytest tests/
+uv run pytest -q
 ```
 
 Покрытие: fix_link, все парсеры, все конвертеры, round-trip, извлечение страны,
 обработка ошибок, device fingerprint (`test_fingerprint.py`), web-роуты с
 моком httpx (`test_web_routes.py`).
+
+## Разработка
+
+```bash
+uv sync --all-extras            # runtime + dev (pytest, ruff)
+uv run pytest -q                # тесты
+uv run ruff check .             # линтер (конфиг в pyproject.toml)
+uvx pre-commit run --all-files  # pre-commit hook (ruff)
+```
+
+CI: GitHub Actions (ruff + pytest 3.10/3.13 + pip-audit), Dependabot (pip,
+github-actions). Зависимости — два extras: `[bot]` (aiogram) и `[web]`
+(fastapi/uvicorn/python-multipart/jinja2); core: httpx/pycryptodome/cryptography/pyyaml.
+`requirements.txt` удалён — используется `uv.lock`.
