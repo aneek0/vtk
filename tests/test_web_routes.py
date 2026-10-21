@@ -15,6 +15,7 @@ def client(monkeypatch):
         def __init__(self, text):
             self.text = text
             self.headers = {}
+            self.is_redirect = False
 
         def raise_for_status(self):
             pass
@@ -34,6 +35,10 @@ def client(monkeypatch):
             captured["headers"] = headers
             return _Resp("vless://uuid@host:443?encryption=none#Node1\n")
 
+    async def _allow(url):
+        return None
+
+    monkeypatch.setattr("core.net.assert_url_allowed", _allow)
     monkeypatch.setattr("httpx.AsyncClient", _Client)
     import web.main as main
     return TestClient(main.app), captured
@@ -112,3 +117,37 @@ def test_convert_incy_plain_share_links(client):
     r = client[0].post("/api/convert", json={"input": link, "format": "txt"})
     assert r.status_code == 200, r.text
     assert "vless://" in r.json()["result"]
+
+
+def test_forwarded_for_ignored_from_untrusted_peer(monkeypatch):
+    """A direct client must not be able to pick its own rate-limit bucket."""
+    from starlette.requests import Request
+
+    from web.routes.proxy import _trusted_client_ip
+
+    def make(peer, xff):
+        scope = {
+            "type": "http", "method": "GET", "path": "/p/x", "headers": [(b"x-forwarded-for", xff.encode())],
+            "client": (peer, 1234), "query_string": b"", "scheme": "http",
+        }
+        return _trusted_client_ip(Request(scope))
+
+    assert make("8.8.8.8", "1.2.3.4") == "8.8.8.8"
+    assert make("127.0.0.1", "1.2.3.4, 10.0.0.1") == "1.2.3.4"
+
+
+def test_rate_limiter_prunes_stale_entries(monkeypatch):
+    from web.routes import proxy as proxy_mod
+
+    monkeypatch.setattr(proxy_mod, "_PROXY_RATE_MAX_ENTRIES", 2)
+    proxy_mod._PROXY_RATE_LIMITS.clear()
+    monkeypatch.setattr(proxy_mod.time, "monotonic", lambda: 100.0)
+    assert proxy_mod._proxy_rate_limited("1.1.1.1") is False
+    assert proxy_mod._proxy_rate_limited("2.2.2.2") is False
+    # After the window passes, both entries are stale; a third client must not
+    # reset the table, and the stale keys must be gone.
+    monkeypatch.setattr(proxy_mod.time, "monotonic", lambda: 101.5)
+    assert proxy_mod._proxy_rate_limited("3.3.3.3") is False
+    assert "1.1.1.1" not in proxy_mod._PROXY_RATE_LIMITS
+    assert "2.2.2.2" not in proxy_mod._PROXY_RATE_LIMITS
+    assert "3.3.3.3" in proxy_mod._PROXY_RATE_LIMITS

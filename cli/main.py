@@ -15,7 +15,6 @@ import sys
 from core.converters import Format, convert, to_txt
 from core.logic import (
     ParseError,
-    fix_link,
     parse_link,
     parse_subscription_text,
     parse_text_input,
@@ -38,37 +37,6 @@ def _detect_input(text: str) -> str:
     if text.startswith("{") or "proxies:" in text or text.startswith("- name:"):
         return "config"
     return "link"
-
-
-def _convert_link(link: str, fmt: Format | None = None) -> str:
-    link = fix_link(link.strip())
-    node = parse_link(link)
-    if fmt is None:
-        fmt = load_settings().link_format
-    return convert([node], fmt)
-
-
-def _convert_links(text: str, fmt: Format | None = None) -> tuple:
-    nodes = parse_text_input(text)
-    nodes = [n for n in nodes if n.protocol != "error"]
-    if not nodes:
-        raise ParseError("No valid proxy links found")
-    if fmt is None:
-        s = load_settings()
-        lines = [ln.strip() for ln in text.strip().splitlines() if ln.strip() and not ln.startswith("#")]
-        share_prefixes = ("vless://", "vmess://", "trojan://", "ss://", "ssr://")
-        link_lines = [ln for ln in lines if any(ln.startswith(p) for p in share_prefixes)]
-        fmt = s.txt_format if len(link_lines) > 1 else s.link_format
-    return convert(nodes, fmt), len(nodes)
-
-
-def _convert_config(text: str, fmt: Format | None = None) -> tuple:
-    nodes = from_config_reverse(text)
-    if not nodes:
-        raise ParseError("No convertible nodes found")
-    if fmt is None:
-        fmt = load_settings().config_format
-    return convert(nodes, fmt), len(nodes)
 
 
 def do_convert(input_str: str, fmt_str: str = "", output: str = ""):
@@ -183,46 +151,14 @@ def cmd_interactive(args):
         chosen_fmt = formats[idx]
     except (ValueError, IndexError):
         chosen_fmt = current
-
-    try:
-        if input_type == "sub":
-            async def _fetch():
-                from core.logic import fetch_subscription
-                return await fetch_subscription(text.strip())
-            content = asyncio.run(_fetch())
-            nodes = parse_subscription_text(content)
-            if not nodes:
-                nodes = from_config_reverse(content)
-            if not nodes:
-                print("❌ No nodes found", file=sys.stderr)
-                sys.exit(1)
-            result = convert(nodes, chosen_fmt)
-            print(f"\n✅ {len(nodes)} nodes:\n")
-
-        elif input_type == "config":
-            nodes = from_config_reverse(text)
-            if not nodes:
-                print("❌ No convertible nodes", file=sys.stderr)
-                sys.exit(1)
-            result = convert(nodes, chosen_fmt)
-            print(f"\n✅ {len(nodes)} nodes:\n")
-
-        else:
-            link_prefixes = ("vless://", "vmess://", "trojan://", "ss://", "ssr://", "hysteria2://", "socks://")
-            stripped = text.strip()
-            is_single = any(stripped.startswith(p) for p in link_prefixes) and "\n" not in stripped
-            if is_single:
-                result = _convert_link(stripped, chosen_fmt)
-                print("\n✅ 1 node:\n")
-            else:
-                result, count = _convert_links(text, chosen_fmt)
-                print(f"\n✅ {count} nodes:\n")
-
-    except ParseError as e:
-        print(f"❌ {e}", file=sys.stderr)
+    res = asyncio.run(process_input(text, fmt=chosen_fmt))
+    if not res.get("ok"):
+        print(f"❌ {res.get('error', 'Processing failed')}", file=sys.stderr)
         sys.exit(1)
-
+    result = res["result"]
+    print(f"\n✅ {res['nodes']} nodes:\n")
     print(result)
+
 
 
 def _fmt_ext(fmt: Format) -> str:
@@ -320,6 +256,7 @@ def cmd_settings_show(args):
     print(f"Tag prefix    : {s.tag_prefix or '(none)'}")
     print(f"Timeout       : {s.timeout}s")
     print(f"Sub passthrough: {s.sub_passthrough}")
+    print(f"Insecure TLS  : {s.insecure_tls}")
 
 
 def cmd_settings_interactive(args):

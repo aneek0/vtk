@@ -8,8 +8,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
-import httpx
-
 
 class ParseError(Exception):
     pass
@@ -780,124 +778,124 @@ async def fetch_subscription(url: str, timeout: int = 15, return_headers: bool =
     `headers` (optional) are merged into the request (e.g. device fingerprint
     headers for proxied subscriptions).
     """
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=False) as client:
-        resp = await client.get(url, headers=headers or None)
-        resp.raise_for_status()
-        if return_headers:
-            # Parse profile-title/profile-web-page-url from content (Clash/v2ray comments)
-            profile_title = ""
-            profile_url = ""
-            for line in resp.text.splitlines():
-                ls = line.strip()
-                if ls.lower().startswith("profile-title:"):
-                    profile_title = ls.split(":", 1)[1].strip()
-                elif ls.lower().startswith("profile-web-page-url:"):
-                    profile_url = ls.split(":", 1)[1].strip()
+    from core import net
 
-            def _decode_val(v: str) -> str:
-                if v.startswith("base64:"):
-                    try:
-                        return _b64decode(v[7:])
-                    except Exception:
-                        return v
-                return v
+    resp = await net.fetch(url, timeout=timeout, headers=headers)
+    if return_headers:
+        # Parse profile-title/profile-web-page-url from content (Clash/v2ray comments)
+        profile_title = ""
+        profile_url = ""
+        for line in resp.text.splitlines():
+            ls = line.strip()
+            if ls.lower().startswith("profile-title:"):
+                profile_title = ls.split(":", 1)[1].strip()
+            elif ls.lower().startswith("profile-web-page-url:"):
+                profile_url = ls.split(":", 1)[1].strip()
 
-            def _format_bytes(b: int) -> str:
-                gb = b / (1024 ** 3)
-                return f"{gb:.1f}"
-
-            def _format_userinfo(val: str) -> str:
-                parts = {}
-                for m in re.finditer(r'(\w+)=([^;]+)', val):
-                    parts[m.group(1)] = m.group(2)
-                items = []
-                up = parts.get("upload", "0")
-                if up == "0" or up.lower() == "unlimited":
-                    items.append("upload: unlimited")
-                else:
-                    items.append(f"upload: {_format_bytes(int(up))} GB")
-                dl = parts.get("download", "0")
-                items.append(f"download: {_format_bytes(int(dl))} GB")
-                total = parts.get("total", "0")
-                items.append(f"total: {_format_bytes(int(total))} GB")
-                expire = parts.get("expire", "")
-                if expire:
-                    try:
-                        dt = datetime.fromtimestamp(int(expire))
-                        items.append(f"expire: {dt.strftime('%d.%m.%Y')}")
-                    except (ValueError, OSError):
-                        items.append(f"expire: {expire}")
-                return " | ".join(items)
-
-            def _format_interval(val: str) -> str:
+        def _decode_val(v: str) -> str:
+            if v.startswith("base64:"):
                 try:
-                    n = int(val)
-                    if n == 1:
-                        return "1h"
-                    return f"{n}h"
-                except ValueError:
-                    return val
+                    return _b64decode(v[7:])
+                except Exception:
+                    return v
+            return v
 
-            h = resp.headers
-            resp_headers_list = []
+        def _format_bytes(b: int) -> str:
+            gb = b / (1024 ** 3)
+            return f"{gb:.1f}"
 
-            # Profile-Title (from content comment or header)
-            if not profile_title:
-                pt = h.get("profile-title", "")
-                if pt:
-                    profile_title = _decode_val(pt)
-            if profile_title:
-                resp_headers_list.append(("Profile-Title", profile_title))
+        def _format_userinfo(val: str) -> str:
+            parts = {}
+            for m in re.finditer(r'(\w+)=([^;]+)', val):
+                parts[m.group(1)] = m.group(2)
+            items = []
+            up = parts.get("upload", "0")
+            if up == "0" or up.lower() == "unlimited":
+                items.append("upload: unlimited")
+            else:
+                items.append(f"upload: {_format_bytes(int(up))} GB")
+            dl = parts.get("download", "0")
+            items.append(f"download: {_format_bytes(int(dl))} GB")
+            total = parts.get("total", "0")
+            items.append(f"total: {_format_bytes(int(total))} GB")
+            expire = parts.get("expire", "")
+            if expire:
+                try:
+                    dt = datetime.fromtimestamp(int(expire))
+                    items.append(f"expire: {dt.strftime('%d.%m.%Y')}")
+                except (ValueError, OSError):
+                    items.append(f"expire: {expire}")
+            return " | ".join(items)
 
-            # Account (from content-disposition filename)
-            cd = h.get("content-disposition", "")
-            if "filename=" in cd:
-                m = re.search(r'filename=([^;\s]+)', cd)
-                if m:
-                    acc = m.group(1).strip().strip('"')
-                    if acc:
-                        resp_headers_list.append(("Account", acc))
+        def _format_interval(val: str) -> str:
+            try:
+                n = int(val)
+                if n == 1:
+                    return "1h"
+                return f"{n}h"
+            except ValueError:
+                return val
 
-            # Subscription-Userinfo
-            si = h.get("subscription-userinfo", "")
-            if si:
-                resp_headers_list.append(("Subscription-Userinfo", _format_userinfo(si)))
+        h = resp.headers
+        resp_headers_list = []
 
-            # Update-Interval
-            ui = h.get("profile-update-interval", "")
-            if ui:
-                resp_headers_list.append(("Update-Interval", _format_interval(ui)))
+        # Profile-Title (from content comment or header)
+        if not profile_title:
+            pt = h.get("profile-title", "")
+            if pt:
+                profile_title = _decode_val(pt)
+        if profile_title:
+            resp_headers_list.append(("Profile-Title", profile_title))
 
-            # Content-Type
-            ct = h.get("content-type", "")
-            if ct:
-                resp_headers_list.append(("Content-Type", ct))
+        # Account (from content-disposition filename)
+        cd = h.get("content-disposition", "")
+        if "filename=" in cd:
+            m = re.search(r'filename=([^;\s]+)', cd)
+            if m:
+                acc = m.group(1).strip().strip('"')
+                if acc:
+                    resp_headers_list.append(("Account", acc))
 
-            # Support-Url
-            su = h.get("support-url", "")
-            if su:
-                resp_headers_list.append(("Support-Url", su))
+        # Subscription-Userinfo
+        si = h.get("subscription-userinfo", "")
+        if si:
+            resp_headers_list.append(("Subscription-Userinfo", _format_userinfo(si)))
 
-            # Announce (base64 decoded)
-            an = h.get("announce", "")
-            if an:
-                resp_headers_list.append(("Announce", _decode_val(an)))
+        # Update-Interval
+        ui = h.get("profile-update-interval", "")
+        if ui:
+            resp_headers_list.append(("Update-Interval", _format_interval(ui)))
 
-            # Announce-Url
-            au = h.get("announce-url", "")
-            if au:
-                resp_headers_list.append(("Announce-Url", au))
+        # Content-Type
+        ct = h.get("content-type", "")
+        if ct:
+            resp_headers_list.append(("Content-Type", ct))
 
-            # Profile-Web-Page-Url (from content comment or header)
-            if not profile_url:
-                pw = h.get("profile-web-page-url", "")
-                if pw:
-                    profile_url = pw
-            if profile_url:
-                resp_headers_list.append(("Profile-Web-Page-Url", profile_url))
+        # Support-Url
+        su = h.get("support-url", "")
+        if su:
+            resp_headers_list.append(("Support-Url", su))
 
-            return {"content": resp.text, "headers": resp_headers_list}
-        return resp.text
+        # Announce (base64 decoded)
+        an = h.get("announce", "")
+        if an:
+            resp_headers_list.append(("Announce", _decode_val(an)))
+
+        # Announce-Url
+        au = h.get("announce-url", "")
+        if au:
+            resp_headers_list.append(("Announce-Url", au))
+
+        # Profile-Web-Page-Url (from content comment or header)
+        if not profile_url:
+            pw = h.get("profile-web-page-url", "")
+            if pw:
+                profile_url = pw
+        if profile_url:
+            resp_headers_list.append(("Profile-Web-Page-Url", profile_url))
+
+        return {"content": resp.text, "headers": resp_headers_list}
+    return resp.text
 
 
 def extract_subscription_name(url: str, content: str, resp_headers: dict | None = None) -> str:
@@ -991,18 +989,17 @@ def decrypt_input(raw: str) -> str:
     """Decrypt all ``happ://`` / ``incy://`` links in a raw input string.
 
     Pure offline wrapper over the bundled ``core.happ`` / ``core.incy``
-    decryptors. Per-link failures are swallowed (the original text is left
-    untouched for that link) so a single un-decodable link never kills the
-    whole batch. Already-plain text passes through unchanged (idempotent).
+    decryptors. Per-link decode failures are handled inside the decryptors
+    (the original link stays untouched), so only an unexpected bug can raise
+    here. Already-plain text passes through unchanged (idempotent).
     """
+    from core.errors import DecryptError
     from core.happ import decrypt_text as happ_decrypt_text
     from core.incy import decrypt_text as incy_decrypt_text
 
     text = raw
     for decryptor in (happ_decrypt_text, incy_decrypt_text):
-        # Decryptor guards per-link already; a top-level failure here
-        # means nothing matched — leave text as-is.
-        with contextlib.suppress(Exception):  # noqa: PERF203 - two decryptors
+        with contextlib.suppress(DecryptError):
             text = decryptor(text)
     return text
 

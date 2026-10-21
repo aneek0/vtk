@@ -12,6 +12,7 @@ import hashlib
 import os
 import random
 import re
+import secrets
 from urllib.parse import unquote
 
 # Default base URL for passthrough / app-link generation. Override via env.
@@ -128,7 +129,7 @@ def random_device() -> dict:
         "ver": f"{random.randint(15, 18)}.{random.randint(0, 3)}.{random.randint(0, 10)}",
         "model": _pick(IOS_MODELS if os_name == "ios" else ANDROID_MODELS),
         "locale": _pick(LOCALES),
-        "hwid": hashlib.md5(str(random.random()).encode()).hexdigest()[:12],
+        "hwid": secrets.token_hex(6),
     }
 
 

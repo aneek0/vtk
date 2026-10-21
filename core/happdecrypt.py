@@ -25,6 +25,8 @@ from Crypto.Cipher import PKCS1_v1_5 as PKCS1_cipher
 from Crypto.PublicKey import RSA as CryptoRSA
 from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 
+from core.errors import DecryptError
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -99,7 +101,7 @@ def _pkcs1_decrypt(private_key, ciphertext: bytes) -> bytes:
     sentinel = b"\x00" * 16
     result = cipher.decrypt(ciphertext, sentinel)
     if result is sentinel:
-        raise ValueError("RSA PKCS#1 v1.5 decryption failed")
+        raise DecryptError("RSA PKCS#1 v1.5 decryption failed")
     return result
 
 # Imported-key cache: CryptoRSA.import_key costs ~10-20 ms per RSA key
@@ -146,14 +148,14 @@ def _decrypt_crypt5_body(body: bytes, private_key, salted: bool) -> str:
     `salted` selects which header layout to parse.
     """
     if len(body) < 13:
-        raise ValueError("crypt5 body is too short")
+        raise DecryptError("crypt5 body is too short")
 
     nonce = body[:12]
     salt = None
     length_start = 12
     if salted:
         if len(body) < 22:
-            raise ValueError("crypt5 salted header is too short")
+            raise DecryptError("crypt5 salted header is too short")
         salt = body[14:22]
         length_start = 22
 
@@ -162,12 +164,12 @@ def _decrypt_crypt5_body(body: bytes, private_key, salted: bool) -> str:
     while length_end < len(body) and 48 <= body[length_end] <= 57:
         length_end += 1
     if length_end == length_start:
-        raise ValueError("crypt5 segment length is missing")
+        raise DecryptError("crypt5 segment length is missing")
 
     segment_len = int(body[length_start:length_end].decode("ascii"))
     packed = body[length_end:]
     if len(packed) == 0 or segment_len > len(packed) - 1:
-        raise ValueError("crypt5 segment is truncated")
+        raise DecryptError("crypt5 segment is truncated")
 
     url_b64 = packed[1 : 1 + segment_len].decode("ascii")
     enc_str = packed[1 + segment_len :].decode("latin-1")
@@ -180,7 +182,7 @@ def _decrypt_crypt5_body(body: bytes, private_key, salted: bool) -> str:
     rsa_plaintext_str = rsa_plaintext_bytes.decode("latin-1")
     chacha_key = bytearray(_b64_decode_urlsafe(_swap_pairs(rsa_plaintext_str)))
     if len(chacha_key) != 32:
-        raise ValueError(f"crypt5 key length unexpected: {len(chacha_key)}")
+        raise DecryptError(f"crypt5 key length unexpected: {len(chacha_key)}")
 
     if salt:
         for i in range(len(chacha_key)):
@@ -205,14 +207,14 @@ def _decrypt_crypt5(payload: str) -> str:
     """
     shuffled = _block_pair_swap(payload)
     if len(shuffled) < 8:
-        raise ValueError("crypt5 payload is too short")
+        raise DecryptError("crypt5 payload is too short")
 
     marker = shuffled[:4] + shuffled[-4:]
     body = shuffled[4:-4].encode("latin-1")
 
     keys = _load_crypt5_keys()
     if marker not in keys:
-        raise ValueError(f"No RSA key found for marker: {marker}")
+        raise DecryptError(f"No RSA key found for marker: {marker}")
 
     private_key = _load_pkcs8_key(keys[marker])
 
@@ -235,7 +237,7 @@ def _decrypt_crypt5(payload: str) -> str:
 def _decrypt_crypt1to4(ordinal: int, payload: str) -> str:
     """Decrypt crypt1–4 payload → plaintext URL."""
     if ordinal < 0 or ordinal >= len(_PKCS1_KEYS_B64):
-        raise ValueError(f"Invalid key ordinal: {ordinal}")
+        raise DecryptError(f"Invalid key ordinal: {ordinal}")
 
     private_key = _load_pkcs1_key(_PKCS1_KEYS_B64[ordinal])
     key_size = (private_key.size_in_bits() + 7) // 8  # bytes
@@ -264,7 +266,7 @@ def decrypt_link(link: str) -> str:
     Accepts:
       happ://crypt/… , happ://crypt2/… , … , happ://crypt5/…
     Returns the decrypted URL.
-    Raises ValueError on failure.
+    Raises DecryptError on failure.
     """
     path = link.removeprefix("happ://")
 
@@ -279,7 +281,7 @@ def decrypt_link(link: str) -> str:
     if path.startswith("crypt/"):
         return _decrypt_crypt1to4(0, path.removeprefix("crypt/"))
 
-    raise ValueError(f"Unknown link format: {link}")
+    raise DecryptError(f"Unknown link format: {link}")
 
 
 def decrypt_text(text: str) -> str:

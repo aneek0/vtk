@@ -1,13 +1,23 @@
 """Settings — default behavior per input type."""
 
+import contextlib
 import json
+import logging
 import os
-from dataclasses import dataclass
+import tempfile
+from dataclasses import dataclass, fields
 from pathlib import Path
 
 from .converters import Format
 
+logger = logging.getLogger(__name__)
+
 DEFAULT_SETTINGS_PATH = os.path.expanduser("~/.config/vtk/settings.json")
+
+# Fields stored as Format enum values rather than plain strings.
+_FORMAT_KEYS = frozenset(
+    {"sub_format", "link_format", "config_format", "txt_format", "web_default_format"}
+)
 
 
 @dataclass
@@ -34,6 +44,9 @@ class Settings:
     # Subscription fetch timeout
     timeout: int = 15
 
+    # Skip TLS certificate verification when fetching subscriptions
+    insecure_tls: bool = False
+
     # Group FlClash proxy-groups by country (from node name emoji)
     group_by_country: bool = False
 
@@ -51,6 +64,15 @@ class Settings:
     proxy_hwid_on: bool = True  # include X-Hwid when proxy headers are sent
 
 
+def _coerce(key: str, value):
+    """Convert one stored value; raise ValueError when it cannot be used."""
+    if key in _FORMAT_KEYS:
+        return value if isinstance(value, Format) else Format(value)
+    if key == "timeout":
+        return int(value)
+    return value
+
+
 def load_settings(path: str = "") -> Settings:
     path = path or DEFAULT_SETTINGS_PATH
     f = Path(path)
@@ -58,15 +80,22 @@ def load_settings(path: str = "") -> Settings:
         return Settings()
     try:
         data = json.loads(f.read_text())
-        known = {f.name for f in Settings.__dataclass_fields__.values()}
-        filtered = {k: v for k, v in data.items() if k in known}
-        # Convert string → Format enum
-        for key in ("sub_format", "link_format", "config_format", "txt_format"):
-            if key in filtered and isinstance(filtered[key], str):
-                filtered[key] = Format(filtered[key])
-        return Settings(**filtered)
-    except (json.JSONDecodeError, ValueError, KeyError):
+    except (OSError, json.JSONDecodeError):
         return Settings()
+    if not isinstance(data, dict):
+        return Settings()
+
+    known = {field.name for field in fields(Settings)}
+    values = {}
+    for key, value in data.items():
+        if key not in known:
+            continue
+        try:
+            values[key] = _coerce(key, value)
+        except (TypeError, ValueError):
+            # One bad key must not discard the rest of the file.
+            logger.warning("settings: ignoring invalid %s=%r", key, value)
+    return Settings(**values)
 
 
 def save_settings(settings: Settings, path: str = "") -> None:
@@ -74,19 +103,20 @@ def save_settings(settings: Settings, path: str = "") -> None:
     f = Path(path)
     f.parent.mkdir(parents=True, exist_ok=True)
     data = {}
-    for key in ("sub_format", "link_format", "config_format", "txt_format", "web_default_format"):
-        val = getattr(settings, key)
-        data[key] = val.value if isinstance(val, Format) else val
-    data["tag_prefix"] = settings.tag_prefix
-    data["timeout"] = settings.timeout
-    data["group_by_country"] = settings.group_by_country
-    data["sub_passthrough"] = settings.sub_passthrough
-    data["proxy_headers_on"] = settings.proxy_headers_on
-    data["proxy_os"] = settings.proxy_os
-    data["proxy_ua"] = settings.proxy_ua
-    data["proxy_ver"] = settings.proxy_ver
-    data["proxy_model"] = settings.proxy_model
-    data["proxy_locale"] = settings.proxy_locale
-    data["proxy_hwid"] = settings.proxy_hwid
-    data["proxy_hwid_on"] = settings.proxy_hwid_on
-    f.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+    for field in fields(settings):
+        val = getattr(settings, field.name)
+        data[field.name] = val.value if isinstance(val, Format) else val
+
+    # Write-then-rename: a crash mid-write leaves the previous file intact.
+    fd, tmp = tempfile.mkstemp(dir=f.parent, prefix=".settings-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            json.dump(data, fh, indent=2, ensure_ascii=False)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, 0o600)  # contains the proxy HWID
+        os.replace(tmp, f)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise

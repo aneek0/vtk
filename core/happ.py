@@ -51,7 +51,7 @@ def _passthrough(url: str) -> str | None:
 def _builtin_decrypt(url: str) -> str:
     """Decrypt using the local Python implementation (no network needed).
 
-    Raises ValueError if the format is unknown or decryption fails.
+    Raises DecryptError if the format is unknown or decryption fails.
     Returns the decrypted URL.
     """
     from core.happdecrypt import decrypt_link as _decrypt
@@ -73,7 +73,11 @@ def decrypt_link(url: str) -> str:
     Strategy:
     1. Handle passthrough format (happ://add/<url>) — strip prefix.
     2. Decrypt using built-in Python decryptor (all 34 crypt5 keys bundled, offline, no rate limit).
+
+    Raises DecryptError when the link cannot be decoded.
     """
+    from core.errors import DecryptError
+
     # 1. Passthrough
     passthrough = _passthrough(url)
     if passthrough is not None:
@@ -83,7 +87,7 @@ def decrypt_link(url: str) -> str:
     try:
         return _builtin_decrypt(url)
     except ValueError as e:
-        raise RuntimeError(f"Decrypt failed: {e}") from e
+        raise DecryptError(f"Decrypt failed: {e}") from e
 
 
 def decrypt_text(text: str) -> str:
@@ -103,17 +107,13 @@ def decrypt_text(text: str) -> str:
     return HAPP_RE.sub(_replace, text)
 
 
-async def fetch_sub_with_decrypt(url: str, timeout: int = 15) -> str:
+async def fetch_sub_with_decrypt(url: str, timeout: float = 15) -> str:
     """Fetch content from a URL (subscription or other).
 
-    Fetches directly via httpx, then decrypts any happ:// links found in the text.
-    No external API calls needed — uses built-in decryptor.
+    Fetches via the shared core.net policy, then decrypts any ``happ://``
+    links found in the text. No external API calls needed.
     """
-    import httpx
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=False) as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        text = resp.text
+    from core import net
+    resp = await net.fetch(url, timeout=timeout)
     # Decrypt any happ:// links found in the text
-    return decrypt_text(text)
-
+    return decrypt_text(resp.text)

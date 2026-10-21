@@ -248,7 +248,7 @@ async function convertLinks(){
       if(s.reality&&rowDefs.indexOf('PBK')<0) rowDefs=rowDefs.concat([['PBK','pbk'],['SID','sid']]);
       rowDefs.forEach(function(def){
         var key=def[0],field=def[1],val=s[field]||'';
-        if(val) details.innerHTML+='<div><span class="detail-key">'+key+'</span><span class="detail-val">'+esc(val)+'</span></div>';
+        if(val) details.innerHTML+='<div><span class="detail-key">'+esc(key)+'</span><span class="detail-val">'+esc(val)+'</span></div>';
       });
       // copy buttons
       var btnRow=document.createElement('div');

@@ -78,16 +78,19 @@ HTML-форма + JSON API:
 ## Структура
 
 ```
-core/      — общая бизнес-логика
-  logic.py       — парсинг ссылок, fix_link(), загрузка подписок, extract_country()
-  converters.py  — генерация форматов вывода
+core/
+  logic.py       — парсинг ссылок, fix_link(), fetch subscriptions (headers=), extract_country()
+  converters.py  — singbox / mihomo / flclash / txt output
+  net.py         — единая политика fetch: TLS verify, лимит редиректов, SSRF-гвард
+  errors.py      — DecryptError (общий для happ/incy)
+  fingerprint.py — device fingerprint: parse/generate params, app-link parse, random, get_proxy_base
   reverse.py     — обратная конвертация (config → share links)
-  settings.py    — настройки пользователя
+  settings.py    — настройки пользователя (атомарная запись, включая proxy device)
   happ.py        — happ://crypt* офлайн-дешифратор (все RSA-ключи вшиты)
   incy.py        — incy://crypt* офлайн-дешифратор (AES-256-GCM, keymat вшит)
-bot/       — Telegram bot (aiogram 3)
-web/       — FastAPI + HTML + JSON API
-cli/       — CLI (typer)
+bot/       — Telegram bot (aiogram 3): /settings, /proxy, меню device, импорт app-link
+web/       — FastAPI: /convert, /proxy (/p/<params>/<url>), /api/device/random, HTML
+cli/       — CLI (argparse, не typer)
 ```
 
 ## Ключевые возможности core API
@@ -149,21 +152,20 @@ X-Device-Os/Model, Accept-Language) в запросы подписок:
 (`core.fingerprint.parse_app_proxy_url`, host-agnostic) и переписывать
 device-настройки, включая `proxy_headers_on`.
 
-## Структура
+## Инварианты
 
-```
-core/
-  logic.py       — парсинг ссылок, fix_link(), fetch subscriptions (headers=), extract_country()
-  converters.py  — singbox / mihomo / flclash / txt output
-  fingerprint.py — device fingerprint: parse/generate params, app-link parse, random, get_proxy_base
-  reverse.py     — обратная конвертация (config → share links)
-  settings.py    — настройки пользователя (включая proxy device)
-  happ.py        — happ://crypt* офлайн-дешифратор (все RSA-ключи вшиты)
-  incy.py        — incy://crypt* офлайн-дешифратор (AES-256-GCM, keymat вшит)
-bot/       — Telegram bot (aiogram 3): /settings, /proxy, меню device, импорт app-link
-web/       — FastAPI: /convert, /proxy (/p/<params>/<url>), /api/device/random, HTML
-cli/       — CLI (typer)
-```
+- Один путь обработки: `core.logic.process_input` (decrypt → detect → fetch/parse →
+  convert). Бот, веб и CLI не вызывают `decrypt_text` сами.
+- Все сетевые запросы идут через `core.net.fetch`: TLS-проверка включена
+  (отключается только `insecure_tls` в настройках), редиректы ≤ 3, на каждом
+  хопе — SSRF-гвард (приватные/loopback адреса отклоняются, обход —
+  `VTK_ALLOW_PRIVATE_URLS=1`).
+- Расшифровка: `happ://`/`incy://` бросают `core.errors.DecryptError`;
+  per-link ошибки не валят батч, другие исключения — валят (это баги).
+- Настройки пишутся атомарно (`tmp` + `os.replace`, режим 0600) и читаются
+  поключево: битое значение отбрасывается, остальные сохраняются.
+- Device fingerprint — только `core/fingerprint.py`.
+- Словарь терминов — `GLOSSARY.md`, решения — `docs/adr/`.
 
 ## Тесты
 

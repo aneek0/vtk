@@ -1,4 +1,5 @@
 import base64
+import ipaddress
 import re
 import time
 from urllib.parse import unquote
@@ -7,11 +8,16 @@ import httpx
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
+from core.converters import Format, convert
 from core.fingerprint import (
     generate_device_fingerprint,
     parse_device_params,
+    random_device,
 )
-from core.happ import _get_client_ip
+from core.happ import decrypt_text
+from core.logic import ParseError, parse_subscription_text
+from core.net import ResolveError, UnsafeURLError, fetch
+from core.settings import load_settings
 
 router = APIRouter()
 
@@ -29,7 +35,8 @@ def _proxy_rate_limited(ip: str) -> bool:
     """Return True if the request should be rejected (rate limited).
 
     Enforces at most one request per ``_PROXY_MIN_INTERVAL`` seconds per IP.
-    The limiter state is bounded to avoid unbounded memory growth.
+    When the table overflows, stale entries are pruned instead of resetting
+    every client at once.
     """
     now = time.monotonic()
     last = _PROXY_RATE_LIMITS.get(ip)
@@ -37,8 +44,27 @@ def _proxy_rate_limited(ip: str) -> bool:
         return True
     _PROXY_RATE_LIMITS[ip] = now
     if len(_PROXY_RATE_LIMITS) > _PROXY_RATE_MAX_ENTRIES:
-        _PROXY_RATE_LIMITS.clear()
+        cutoff = now - _PROXY_MIN_INTERVAL
+        for k in [k for k, t in _PROXY_RATE_LIMITS.items() if t <= cutoff]:
+            del _PROXY_RATE_LIMITS[k]
     return False
+
+
+def _trusted_client_ip(request: Request) -> str:
+    """Rate-limit key. X-Forwarded-For counts only when the direct peer is a
+    local reverse proxy; otherwise the header is attacker-controlled."""
+    peer = request.client.host if request.client else ""
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded and _is_loopback(peer):
+        return forwarded.split(",")[0].strip()
+    return peer or "unknown"
+
+
+def _is_loopback(ip: str) -> bool:
+    try:
+        return ipaddress.ip_address(ip).is_loopback
+    except ValueError:
+        return False
 
 
 @router.get("/p/{url:path}")
@@ -49,17 +75,13 @@ async def api_proxy(
     hwid_off: str = Query("", help="Set to '1' to disable HWID"),
     seed_random: str = Query("", help="Set to '1' for random seed"),
 ):
-    client_ip = _get_client_ip(request)
+    client_ip = _trusted_client_ip(request)
     if _proxy_rate_limited(client_ip):
         return JSONResponse(
             {"error": "Rate limit exceeded. Maximum 1 request per second."},
             status_code=429,
             headers={"Retry-After": "1"},
         )
-
-    from core.converters import Format, convert
-    from core.happ import decrypt_text
-    from core.logic import ParseError, parse_subscription_text
 
     raw_path = unquote(url)
     match = re.search(r"(https?://)", raw_path)
@@ -71,6 +93,8 @@ async def api_proxy(
     split_pos = match.start()
     device_part = raw_path[:split_pos].rstrip("/")
     target_url = raw_path[split_pos:]
+
+
 
     device_params = parse_device_params(device_part) if device_part else {}
     ua = device_params.get("ua", "")
@@ -84,7 +108,7 @@ async def api_proxy(
         return JSONResponse({"error": f"Invalid subscription URL: {target_url}"}, status_code=400)
 
     if seed_random == "1":
-        d = _random_device()
+        d = random_device()
         ua = ua or d["ua"]
         hwid = hwid or d["hwid"]
         os_name = os_name or d["os"]
@@ -101,13 +125,22 @@ async def api_proxy(
     headers["X-Device-Model"] = fingerprint["X-Device-Model"]
     headers["Accept-Language"] = fingerprint["Accept-Language"]
 
+    timeout = load_settings().timeout
+
     try:
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-            output_format = format.lower().replace("-", "_")
-            resp = await client.get(target_url, headers=headers)
-            resp.raise_for_status()
-            content = resp.text
-    except Exception as e:
+        output_format = format.lower().replace("-", "_")
+        resp = await fetch(target_url, timeout=timeout, headers=headers)
+        content = resp.text
+    except UnsafeURLError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    except ResolveError as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
+    except httpx.HTTPStatusError as e:
+        return JSONResponse(
+            {"error": f"Upstream returned {e.response.status_code} for {target_url}"},
+            status_code=502,
+        )
+    except httpx.HTTPError as e:
         return JSONResponse({"error": f"Failed to fetch {target_url}: {e}"}, status_code=502)
 
     content = decrypt_text(content)
@@ -150,18 +183,3 @@ async def api_proxy(
         return JSONResponse({"error": f"Parse error: {e}"}, status_code=400)
 
 
-def _random_device() -> dict:
-    import hashlib
-    import random
-
-    from core.fingerprint import ANDROID_MODELS, IOS_MODELS, LOCALES, RANDOM_AGENTS
-
-    os_name = random.choice(["ios", "android"])
-    return {
-        "os": os_name,
-        "ua": random.choice(RANDOM_AGENTS),
-        "ver": f"{random.randint(15, 18)}.{random.randint(0, 3)}.{random.randint(0, 10)}",
-        "model": random.choice(IOS_MODELS if os_name == "ios" else ANDROID_MODELS),
-        "locale": random.choice(LOCALES),
-        "hwid": hashlib.md5(str(random.random()).encode()).hexdigest()[:12],
-    }

@@ -4,6 +4,33 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+- TLS verification is on for every subscription fetch; `insecure_tls` setting
+  is the explicit opt-out (previously `verify=False` everywhere).
+- `/p/<params>/<url>` rejects non-http(s) targets and hosts resolving to
+  loopback / LAN / link-local addresses on every redirect hop (SSRF guard in
+  `core/net.py`); `VTK_ALLOW_PRIVATE_URLS=1` opts out for LAN subscriptions.
+  `198.18.0.0/15` (sing-box/mihomo fakeip) stays allowed.
+- `X-Forwarded-For` is honored only from a loopback reverse proxy, so clients
+  can no longer pick their own rate-limit bucket.
+- Detail keys in the web UI are HTML-escaped (stored-XSS vector).
+
+### Fixed
+- A single invalid setting no longer resets the whole settings file; settings
+  are written atomically with mode 0600.
+- `/p/` maps upstream HTTP errors to 502 and respects `Settings.timeout`.
+- Rate limiter prunes stale entries instead of clearing all clients.
+- CLI interactive mode goes through `process_input` (gains happ/incy
+  decryption and identical detection behavior).
+
+### Changed
+- Decryption failures raise `core.errors.DecryptError`; unexpected decryptor
+  errors are no longer swallowed.
+- Removed the duplicate device-fingerprint generator from the web route and the
+  stale `docs/REFACTOR_PLAN.md`; added `GLOSSARY.md` and `docs/adr/`.
+
 ## [1.0.0] - 2026-10-06
 
 Stable release: feature set, packaging and CI complete; API surface

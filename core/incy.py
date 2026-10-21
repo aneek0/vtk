@@ -23,6 +23,8 @@ import re
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from core.errors import DecryptError
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -83,7 +85,7 @@ def derive_key() -> bytes:
     km = _load_keymat()
     a, b = km["a"], km["b"]
     if len(a) < KEYMAT_A_OFFSET + KEYMAT_LEN or len(b) < KEYMAT_B_OFFSET + KEYMAT_LEN:
-        raise RuntimeError("incy: keymat assets are smaller than expected")
+        raise DecryptError("incy: keymat assets are smaller than expected")
     km_a = a[KEYMAT_A_OFFSET: KEYMAT_A_OFFSET + KEYMAT_LEN]
     km_b = b[KEYMAT_B_OFFSET: KEYMAT_B_OFFSET + KEYMAT_LEN]
     seed = b"".join(
@@ -96,7 +98,7 @@ def derive_key() -> bytes:
     k = hashlib.sha256(seed).digest()
     fp = hashlib.sha256(k).hexdigest()
     if fp != EXPECTED_KEY_FINGERPRINT:
-        raise RuntimeError(
+        raise DecryptError(
             f"incy: derived K1 fingerprint mismatch "
             f"(expected {EXPECTED_KEY_FINGERPRINT}, got {fp}) — "
             "keymat out of sync with published clients"
@@ -130,22 +132,22 @@ def is_incy(text: str) -> bool:
 def decrypt_link(link: str) -> str:
     """Decrypt a single incy://crypt1/<payload> link.
 
-    Returns the embedded subscription URL (string). Raises RuntimeError on
+    Returns the embedded subscription URL (string). Raises DecryptError on
     malformed input or authentication failure.
     """
     if not link or not isinstance(link, str):
-        raise RuntimeError("incy: link must be a non-empty string")
+        raise DecryptError("incy: link must be a non-empty string")
     if not link.startswith(PREFIX):
-        raise RuntimeError(f"incy: expected {PREFIX} prefix")
+        raise DecryptError(f"incy: expected {PREFIX} prefix")
 
     payload = link[len(PREFIX):].strip().rstrip("/")
     if not payload:
-        raise RuntimeError("incy: empty payload")
+        raise DecryptError("incy: empty payload")
 
     wire = _b64url_decode(payload)
     # iv (12) + tag (16) + at least 1 ct byte
     if len(wire) < 12 + 16 + 1:
-        raise RuntimeError("incy: payload too short")
+        raise DecryptError("incy: payload too short")
 
     iv = wire[:12]
     tag = wire[-16:]
@@ -156,16 +158,16 @@ def decrypt_link(link: str) -> str:
     try:
         plaintext = aes.decrypt(iv, ct + tag, None)
     except Exception as e:  # authentication failure / tampering
-        raise RuntimeError(f"incy: authentication failed ({e})") from e
+        raise DecryptError(f"incy: authentication failed ({e})") from e
 
     try:
         parsed = json.loads(plaintext.decode("utf-8"))
     except Exception as e:
-        raise RuntimeError(f"incy: malformed plaintext ({e})") from e
+        raise DecryptError(f"incy: malformed plaintext ({e})") from e
 
     url = parsed.get("url")
     if not isinstance(url, str) or not url:
-        raise RuntimeError("incy: missing url field")
+        raise DecryptError("incy: missing url field")
     return url
 
 
@@ -182,12 +184,8 @@ def decrypt_text(text: str) -> str:
     return INCY_RE.sub(_replace, text)
 
 
-async def fetch_sub_with_decrypt(url: str, timeout: int = 15) -> str:
-    """Fetch content from a URL and decrypt any incy:// links found in the text."""
-    import httpx
-
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=False) as client:
-        resp = await client.get(url)
-        resp.raise_for_status()
-        text = resp.text
-    return decrypt_text(text)
+async def fetch_sub_with_decrypt(url: str, timeout: float = 15) -> str:
+    """Fetch content from a URL and decrypt any ``incy://`` links in the text."""
+    from core import net
+    resp = await net.fetch(url, timeout=timeout)
+    return decrypt_text(resp.text)
