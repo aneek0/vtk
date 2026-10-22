@@ -59,6 +59,7 @@ CB_LINK_FMT = "link"
 CB_CONFIG_FMT = "cfg"
 CB_TXT_FMT = "txt"
 CB_PROXY = "proxy"
+_pending_inputs: dict[str, tuple] = {}
 
 
 def _format_kb(prefix: str, current: Format) -> InlineKeyboardMarkup:
@@ -297,6 +298,49 @@ async def cb_section(callback: CallbackQuery):
     )
     await callback.answer()
 
+@router.callback_query(F.data.regexp(r"^proto:\d{4}:(.+)$"))
+async def cb_protocol(callback: CallbackQuery):
+    """Re-run conversion for the picked protocol and deliver output."""
+    parts = callback.data.split(":", 2)
+    if len(parts) < 3:
+        await callback.answer("Bad request", show_alert=False)
+        return
+    key, proto = parts[1], parts[2]
+    entry = _pending_inputs.pop(key, None)
+    if not entry:
+        await callback.answer("⏳ Expired — send the subscription again", show_alert=True)
+        return
+    text, fmt = entry
+    await callback.answer()
+    s = load_settings()
+    device_headers = None
+    if s.proxy_headers_on:
+        device_headers = generate_device_fingerprint(
+            ua=s.proxy_ua, hwid=s.proxy_hwid if s.proxy_hwid_on else "",
+            os_name=s.proxy_os, ver=s.proxy_ver, model=s.proxy_model,
+            locale=s.proxy_locale,
+        )
+    status = await callback.message.edit_text(
+        f"⏳ Converting {proto} → {fmt.value}...", reply_markup=None
+    )
+    res = await process_input(text, fmt=fmt, device_headers=device_headers, protocol=None if proto == "all" else proto)
+    if not res.get("ok"):
+        await status.edit_text(f"❌ {res.get('error', 'Unknown error')}")
+        return
+    result = res["result"]
+    ext = _fmt_ext(fmt)
+    if res["sub_name"]:
+        safe_name = "".join(c for c in res["sub_name"] if c.isalnum() or c in "._- ")[:50].strip()
+        filename = f"{safe_name}_{proto}.{ext}"
+    else:
+        filename = f"config_{proto}.{ext}"
+    if ext == "yaml" or len(result) > 3000:
+        await _reply_as_file(callback.message, result, filename)
+    elif result.strip():
+        await callback.message.reply(f"<pre>{result}</pre>", parse_mode=ParseMode.HTML)
+    else:
+        await callback.message.reply(f"❌ Empty result — {res['nodes']} nodes")
+
 
 @router.callback_query(F.data.startswith((CB_SUB_FMT + ":", CB_LINK_FMT + ":", CB_CONFIG_FMT + ":", CB_TXT_FMT + ":")))
 async def cb_set_format(callback: CallbackQuery):
@@ -490,6 +534,23 @@ async def _process_input(message, text: str):
     sub_name = res["sub_name"]
     content = res["content"]
     fmt = Format(res["format"])
+
+    # Protocol selection — inline keyboard when subscription mixes protocols
+    protocols = res.get("protocols") or {}
+    if len(protocols) > 1:
+        cb = f"proto:{hash(text) & 0xFFFF:04x}"
+        _pending_inputs[cb] = (text, fmt)
+        rows = [[InlineKeyboardButton(
+            text=f"{p} ({cnt})" if p != "all" else f"all ({res.get('total_nodes', nodes)})",
+            callback_data=f"{cb}:{p}",
+        )] for p, cnt in [("all", res.get("total_nodes", nodes)), *protocols.items()]]
+        kb = InlineKeyboardMarkup(inline_keyboard=rows)
+        msg_txt = f"📋 {nodes} nodes «{sub_name}» — select protocol:"
+        if status_msg:
+            await status_msg.edit_text(msg_txt, reply_markup=kb)
+        else:
+            await message.reply(msg_txt, reply_markup=kb)
+        return
 
     # Passthrough: send proxy URL + raw JSON file
     if res["input_type"] == "sub" and s.sub_passthrough:

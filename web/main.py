@@ -72,6 +72,14 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 if __name__ == "__main__":
+    import argparse
+
     import uvicorn
+
+    parser = argparse.ArgumentParser(prog="python -m web.main")
+    parser.add_argument("--host", default="localhost", help="bind address (default: localhost)")
+    parser.add_argument("--port", type=int, default=9000, help="bind port (default: 9000)")
+    args = parser.parse_args()
+
     logging.basicConfig(level=logging.INFO)
-    uvicorn.run(app, host="0.0.0.0", port=9000)
+    uvicorn.run(app, host=args.host, port=args.port)

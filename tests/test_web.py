@@ -89,10 +89,11 @@ class TestTemplates:
         assert "<select" in r.text
         assert 'id="convertFormat"' in r.text
 
-    async def test_spinner_css(self, client):
+    async def test_loader_css(self, client):
         r = await client.get("/static/style.css")
         assert r.status_code == 200
-        assert ".spinner" in r.text
+        assert ".loader" in r.text
+        assert ".spinner" not in r.text
 
     async def test_app_js(self, client):
         r = await client.get("/static/app.js")
@@ -100,7 +101,6 @@ class TestTemplates:
         assert "proxyQR" in r.text
         assert "apiPost" in r.text
         assert "apiGet" in r.text
-        assert "initSelects" in r.text
         assert "initTheme" in r.text
         assert "initDragDrop" in r.text
 

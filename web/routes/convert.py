@@ -64,7 +64,8 @@ async def api_convert(body: dict):
             status_code=400,
         )
 
-    res = await process_input(text, fmt=fmt, device_headers=headers, tag_prefix=tag_prefix)
+    res = await process_input(text, fmt=fmt, device_headers=headers, tag_prefix=tag_prefix,
+                              protocol=body.get("protocol") or None)
 
     if not res.get("ok"):
         return JSONResponse({"ok": False, "error": res.get("error", "Processing failed")}, status_code=400)
@@ -73,7 +74,9 @@ async def api_convert(body: dict):
     servers = res["servers"]
     result = res["result"]
     return {
-        "ok": True, "format": res["format"], "nodes": res["nodes"], "result": result,
+        "ok": True, "format": res["format"], "nodes": res["nodes"],
+        "total_nodes": res.get("total_nodes", res["nodes"]),
+        "protocols": res.get("protocols", {}), "result": result,
         "sub_headers": sub_headers, "servers": servers,
     }
 
@@ -83,6 +86,7 @@ async def api_convert_get(
     input: str = Query(..., help="Proxy link, URL, or raw content"),
     format: str = Query("singbox", help="Output format: singbox, mihomo, txt"),
     tag_prefix: str = Query("", help="Tag prefix"),
+    protocol: str = Query("", help="Filter by protocol (vless, hysteria2, …)"),
     device_on: bool = Query(False, help="Send device headers"),
     os: str = Query("", help="Device OS (android/ios)"),
     ua: str = Query("", help="User-Agent"),
@@ -104,17 +108,15 @@ async def api_convert_get(
             status_code=400,
         )
 
-    res = await process_input(text, fmt=fmt, device_headers=headers, tag_prefix=tag_prefix)
-
+    res = await process_input(text, fmt=fmt, device_headers=headers, tag_prefix=tag_prefix,
+                              protocol=protocol or None)
     if not res.get("ok"):
         return JSONResponse({"ok": False, "error": res.get("error", "Processing failed")}, status_code=400)
-
-    sub_headers = res["sub_headers"]
-    servers = res["servers"]
-    result = res["result"]
     return {
-        "ok": True, "format": res["format"], "nodes": res["nodes"], "result": result,
-        "sub_headers": sub_headers, "servers": servers,
+        "ok": True, "format": res["format"], "nodes": res["nodes"],
+        "total_nodes": res.get("total_nodes", res["nodes"]),
+        "protocols": res.get("protocols", {}), "result": res["result"],
+        "sub_headers": res["sub_headers"], "servers": res["servers"],
     }
 
 

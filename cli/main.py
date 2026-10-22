@@ -39,10 +39,10 @@ def _detect_input(text: str) -> str:
     return "link"
 
 
-def do_convert(input_str: str, fmt_str: str = "", output: str = ""):
+def do_convert(input_str: str, fmt_str: str = "", output: str = "", protocol: str = ""):
     chosen_fmt = Format(fmt_str) if fmt_str else None
 
-    res = asyncio.run(process_input(input_str, fmt=chosen_fmt))
+    res = asyncio.run(process_input(input_str, fmt=chosen_fmt, protocol=protocol or None))
 
     if not res.get("ok"):
         print(f"❌ {res.get('error', 'Processing failed')}", file=sys.stderr)
@@ -96,7 +96,7 @@ def cmd_parse(args):
 
 
 def cmd_convert(args):
-    do_convert(args.input, args.format, args.output)
+    do_convert(args.input, args.format, args.output, getattr(args, "protocol", "") or "")
 
 
 def cmd_interactive(args):
@@ -119,6 +119,28 @@ def cmd_interactive(args):
     if not text:
         print("❌ Empty input", file=sys.stderr)
         sys.exit(1)
+
+    # Protocol selection (only when multiple protocols present)
+    res0 = asyncio.run(process_input(text, fmt=Format.SINGBOX))
+    if not res0.get("ok"):
+        print(f"❌ {res0.get('error', 'Processing failed')}", file=sys.stderr)
+        sys.exit(1)
+    protos = res0["protocols"]
+    chosen_proto = ""
+    if len(protos) > 1:
+        print("\nSelect protocol:")
+        proto_items = [("all", f"all ({res0['total_nodes']})"), *protos.items()]
+        for i, (p, cnt) in enumerate(proto_items, 1):
+            print(f"  {i}. {p} ({cnt})")
+        try:
+            pchoice = input("\nChoice [1]: ").strip()
+        except EOFError:
+            pchoice = ""
+        idx = int(pchoice) - 1 if pchoice.isdigit() else 0
+        if 0 <= idx < len(proto_items):
+            chosen_proto = proto_items[idx][0]
+        chosen_proto = chosen_proto if chosen_proto not in ("", "all") else ""
+
 
     input_type = _detect_input(text)
     type_labels = {"sub": "subscription", "config": "config", "link": "link(s)"}
@@ -151,7 +173,7 @@ def cmd_interactive(args):
         chosen_fmt = formats[idx]
     except (ValueError, IndexError):
         chosen_fmt = current
-    res = asyncio.run(process_input(text, fmt=chosen_fmt))
+    res = asyncio.run(process_input(text, fmt=chosen_fmt, protocol=chosen_proto or None))
     if not res.get("ok"):
         print(f"❌ {res.get('error', 'Processing failed')}", file=sys.stderr)
         sys.exit(1)
@@ -208,8 +230,12 @@ def cmd_batch(args):
         text = f.read()
     nodes = parse_text_input(text)
     nodes = [n for n in nodes if n.protocol != "error"]
+    proto = getattr(args, "protocol", "") or ""
+    if proto:
+        nodes = [n for n in nodes if n.protocol == proto]
     if not nodes:
-        print("❌ No valid nodes found", file=sys.stderr)
+        msg = f"No {proto} nodes found" if proto else "No valid nodes found"
+        print(f"❌ {msg}", file=sys.stderr)
         sys.exit(1)
     try:
         result = convert(nodes, Format(args.format))
@@ -353,6 +379,7 @@ def main():
     p_convert = sub.add_parser("convert", help="Convert a link/URL/config")
     p_convert.add_argument("input", help="Proxy link, subscription URL, or config text")
     p_convert.add_argument("-f", "--format", default="", choices=FORMATS, help="Output format")
+    p_convert.add_argument("-p", "--protocol", default="", help="Filter by protocol (vless, hysteria2, …)")
     p_convert.add_argument("-o", "--output", default="", help="Output file")
 
     # interactive
@@ -376,6 +403,7 @@ def main():
     p_batch = sub.add_parser("batch", help="Convert a file with multiple links")
     p_batch.add_argument("input_file", help="File with links (one per line)")
     p_batch.add_argument("-f", "--format", default="singbox", choices=FORMATS, help="Output format")
+    p_batch.add_argument("-p", "--protocol", default="", help="Filter by protocol (vless, hysteria2, …)")
     p_batch.add_argument("-o", "--output", default="", help="Output file")
 
     # extract

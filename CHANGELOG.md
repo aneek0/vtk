@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   errors are no longer swallowed.
 - Removed the duplicate device-fingerprint generator from the web route and the
   stale `docs/REFACTOR_PLAN.md`; added `GLOSSARY.md` and `docs/adr/`.
+- Web UI rebuilt in the Material 3 dark design language of vpn.akres.fun:
+  self-hosted Unbounded / Onest / Google Sans Code fonts, hero + underlined
+  tabs, docked top bar, MD3 fields, switches and buttons. The home-grown
+  `<select>` dropdown is gone; native selects are styled instead.
+
 
 ## [1.0.0] - 2026-10-06
 

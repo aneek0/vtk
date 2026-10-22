@@ -1018,6 +1018,13 @@ def _detect_input_type(text: str) -> str:
         return "config"
     return "link"
 
+def protocol_counts(nodes: list[Node]) -> dict[str, int]:
+    """Count nodes per protocol, most frequent first."""
+    counts: dict[str, int] = {}
+    for n in nodes:
+        counts[n.protocol] = counts.get(n.protocol, 0) + 1
+    return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+
 
 def _node_to_dict(node: Node) -> dict:
     """Build the rich per-node dict used by the bot/web front-end.
@@ -1101,7 +1108,8 @@ def _node_to_dict(node: Node) -> dict:
 
 
 async def process_input(raw: str, fmt=None, device_headers: dict | None = None,
-                        timeout: int | None = None, tag_prefix: str = "") -> dict:
+                        timeout: int | None = None, tag_prefix: str = "",
+                        protocol: str | None = None) -> dict:
     """Single unified entry point used by bot, web and CLI.
 
     Pipeline (all decryption centralized here):
@@ -1168,6 +1176,14 @@ async def process_input(raw: str, fmt=None, device_headers: dict | None = None,
         nodes = parse_text_input(raw)
         nodes = [n for n in nodes if n.protocol != "error"]
 
+    protocols = protocol_counts(nodes)
+    total_nodes = len(nodes)
+    if protocol and protocol != "all":
+        nodes = [n for n in nodes if n.protocol == protocol]
+        if not nodes:
+            return {"ok": False,
+                    "error": f"No {protocol} nodes (have: {', '.join(protocols)})"}
+
     if not nodes:
         return {"ok": False, "error": "No valid proxy links found."}
 
@@ -1197,6 +1213,8 @@ async def process_input(raw: str, fmt=None, device_headers: dict | None = None,
         "input_type": input_type,
         "format": fmt.value if isinstance(fmt, Format) else str(fmt),
         "nodes": len(nodes),
+        "total_nodes": total_nodes,
+        "protocols": protocols,
         "result": result,
         "servers": servers,
         "sub_headers": sub_headers,
