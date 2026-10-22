@@ -422,7 +422,17 @@ def from_config(text: str) -> list[Node]:
                 nodes = []
                 for item in arr:
                     if isinstance(item, dict):
-                        # Wrap single config in array for from_singbox
+                        # Happy Decoder config arrays carry the real node
+                        # name in top-level "remarks"; outbound tags are
+                        # generic (proxy-2, ...) — rename single proxy
+                        # outbound before parsing.
+                        remark = item.get("remarks")
+                        if remark:
+                            for ob in item.get("outbounds", []):
+                                if ob.get("protocol") in (
+                                    "vless", "vmess", "trojan", "shadowsocks",
+                                ):
+                                    ob["tag"] = remark
                         nodes.extend(from_singbox(json.dumps(item)))
                 return nodes
         except (json.JSONDecodeError, ParseError):

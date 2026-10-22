@@ -476,13 +476,19 @@ def _node_to_dict(node: Node, fmt: str) -> dict:
 
 def to_singbox(nodes: list[Node], tag_prefix: str = "") -> str:
     outbounds = []
+    seen_tags: dict[str, int] = {}
     for i, node in enumerate(nodes):
         if node.protocol == "ssr":
             continue
         tag = node.display_name if node.name else f"{tag_prefix}{node.protocol}-{i}"
         entry = _node_to_dict(node, "singbox")
         if entry:
-            entry["tag"] = tag  # Override tag with proper name
+            if tag in seen_tags:
+                seen_tags[tag] += 1
+                tag = f"{tag}-{seen_tags[tag]}"
+            else:
+                seen_tags[tag] = 0
+            entry["tag"] = tag
             outbounds.append(entry)
     if not outbounds:
         raise ParseError("No convertible nodes")
@@ -502,12 +508,21 @@ def to_mihomo(nodes: list[Node], tag_prefix: str = "") -> str:
 
     names = []
     proxy_dicts = []
+    seen_names: dict[str, int] = {}
     for node in nodes:
         if node.protocol == "ssr":
             continue
         obj = _node_to_dict(node, "mihomo")
         if not obj:
             continue
+        original_name = obj.get("name", "")
+        if not original_name:
+            original_name = f"{node.protocol}-{node.port}"
+        if original_name in seen_names:
+            seen_names[original_name] += 1
+            obj["name"] = f"{original_name}-{seen_names[original_name]}"
+        else:
+            seen_names[original_name] = 0
         names.append(obj["name"])
         proxy_dicts.append(obj)
 
