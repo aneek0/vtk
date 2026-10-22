@@ -1675,23 +1675,23 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiogram", marker = "extra == 'bot'", specifier = ">=3" },
-    { name = "cryptography", specifier = ">=49.0.0" },
-    { name = "fastapi", marker = "extra == 'web'", specifier = ">=0.136.3" },
+    { name = "aiogram", marker = "extra == 'bot'", specifier = ">=3.31.0" },
+    { name = "cryptography", specifier = ">=50.0.2" },
+    { name = "fastapi", marker = "extra == 'web'", specifier = ">=0.142.2" },
     { name = "httpx" },
     { name = "jinja2", marker = "extra == 'web'", specifier = ">=3.1.6" },
     { name = "pycryptodome", specifier = ">=3.23.0" },
     { name = "python-multipart", marker = "extra == 'web'", specifier = ">=0.0.32" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "uvicorn", marker = "extra == 'web'", specifier = ">=0.48.0" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "uvicorn", marker = "extra == 'web'", specifier = ">=0.54.0" },
 ]
 provides-extras = ["bot", "web"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "pytest", specifier = ">=9" },
-    { name = "pytest-asyncio", specifier = ">=0.26" },
-    { name = "ruff", specifier = ">=0.15" },
+    { name = "pytest", specifier = ">=9.1.1" },
+    { name = "pytest-asyncio", specifier = ">=1.4.0" },
+    { name = "ruff", specifier = ">=0.16.10" },
 ]
 
 [[package]]
