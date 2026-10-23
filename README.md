@@ -1,7 +1,9 @@
+<div align="center">
+
 # ⚡ VLESS Toolkit (vtk)
 
 [![CI](https://github.com/aneek0/vtk/actions/workflows/ci.yml/badge.svg)](https://github.com/aneek0/vtk/actions/workflows/ci.yml)
-![version](https://img.shields.io/badge/version-1.1.0-blue)
+![version](https://img.shields.io/badge/version-1.2.0-blue)
 ![license](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)
 ![python](https://img.shields.io/badge/python-3.10%20%7C%203.13-informational)
 
@@ -9,6 +11,8 @@
 One parser, three interfaces: CLI, Telegram bot, web.
 Understands 9 input formats — from `vless://` to encrypted `happ://crypt*` —
 and outputs sing-box, mihomo, FlClash, Xray or plain text.
+
+</div>
 
 ```mermaid
 flowchart LR

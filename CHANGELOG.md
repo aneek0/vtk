@@ -4,9 +4,14 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.0] - 2026-10-24
 
-### Changed
+### Added
+- New output format `xray` — full Xray-core JSON client config (inbounds,
+  routing with leastLoad balancer, observatory, direct/block fallbacks).
+  Schema verified against Xray-core sources: `shadowsocks` protocol naming,
+  `hysteria` v2 flat client config with auth in `streamSettings`, VMess user
+  without `alterId`, mandatory `pingConfig` in `burstObservatory`.
 - `group_by_country` now sorts nodes by country (flag emoji anywhere in the
   server name) in **all** output formats — `Other` last, stable within a
   country — in addition to per-country FlClash proxy groups. Toggle in bot

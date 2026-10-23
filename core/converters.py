@@ -758,8 +758,13 @@ def to_xray(nodes: list[Node], tag_prefix: str = "") -> str:
         },
         "burstObservatory": {
             "subjectSelector": ["proxy"],
-            "probeUrl": "https://www.google.com/generate_204?gl=us",
-            "probeInterval": "10s",
+            "pingConfig": {
+                "destination": "https://www.google.com/generate_204?gl=us",
+                "interval": "10s",
+                "connectivity": "tcpconnect://www.google.com:443",
+                "timeout": "5s",
+                "sampling": 2,
+            },
         },
     }
 
@@ -796,7 +801,6 @@ def _node_to_xray_outbound(node: Node, tag: str) -> dict | None:
                     "users": [
                         {
                             "id": node.uuid,
-                            "alterId": node.vmess_aid,
                             "security": node.vmess_scy,
                         }
                     ],
@@ -814,28 +818,25 @@ def _node_to_xray_outbound(node: Node, tag: str) -> dict | None:
             ]
         }
     elif node.protocol == "ss":
+        # Xray-core: protocol must be "shadowsocks", servers are flat
+        # ShadowsocksServerTarget objects (method/password at target level).
         settings = {
             "servers": [
                 {
                     "address": node.address,
                     "port": node.port,
-                    "users": [
-                        {
-                            "method": node.ss_method,
-                            "password": node.ss_password,
-                        }
-                    ],
+                    "method": node.ss_method,
+                    "password": node.ss_password,
                 }
             ]
         }
     elif node.protocol == "hysteria2":
+        # Xray-core: protocol is "hysteria" (version 2 only); the client
+        # config is flat (version/address/port) and auth goes to streamSettings.
         settings = {
-            "servers": [
-                {
-                    "address": node.address,
-                    "port": node.port,
-                }
-            ]
+            "version": 2,
+            "address": node.address,
+            "port": node.port,
         }
     elif node.protocol == "socks":
         settings = {
@@ -852,9 +853,21 @@ def _node_to_xray_outbound(node: Node, tag: str) -> dict | None:
         return None
 
     stream = _build_xray_stream(node)
+    if node.protocol == "hysteria2":
+        # Hysteria transport runs over QUIC/TLS; auth is the password.
+        stream["network"] = "hysteria"
+        h_settings: dict = {"version": 2}
+        if node.hysteria2_password:
+            h_settings["auth"] = node.hysteria2_password
+        stream["hysteriaSettings"] = h_settings
+        stream["security"] = "tls"
+        if node.sni:
+            stream.setdefault("tlsSettings", {})["serverName"] = node.sni
+        return {"tag": tag, "protocol": "hysteria", "settings": settings, "streamSettings": stream}
+
     return {
         "tag": tag,
-        "protocol": node.protocol,
+        "protocol": "shadowsocks" if node.protocol == "ss" else node.protocol,
         "settings": settings,
         "streamSettings": stream,
     }

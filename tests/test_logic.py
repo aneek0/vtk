@@ -369,10 +369,60 @@ class TestConverters:
         assert proxy["streamSettings"]["security"] == "reality"
         assert "realitySettings" in proxy["streamSettings"]
 
+    def test_xray_shadowsocks_protocol_and_settings(self):
+        """Xray names the protocol "shadowsocks"; servers carry method/password."""
+        nodes = [parse_ss("ss://YWVzLTI1Ni1nY206cGFzcw==@s.com:8388#S1")]
+        proxy = next(
+            o for o in json.loads(convert(nodes, Format.XRAY))["outbounds"] if o["tag"] == "S1"
+        )
+        assert proxy["protocol"] == "shadowsocks"
+        server = proxy["settings"]["servers"][0]
+        assert server["method"] == "aes-256-gcm"
+        assert server["password"] == "pass"
+        assert "users" not in server
+
+    def test_xray_hysteria2_maps_to_hysteria(self):
+        """Xray names it "hysteria" (v2), flat settings, auth in streamSettings."""
+        nodes = [parse_hysteria2("hysteria2://pass@h.com:443/?sni=h.com#H1")]
+        proxy = next(
+            o for o in json.loads(convert(nodes, Format.XRAY))["outbounds"] if o["tag"] == "H1"
+        )
+        assert proxy["protocol"] == "hysteria"
+        assert proxy["settings"] == {"version": 2, "address": "h.com", "port": 443}
+        stream = proxy["streamSettings"]
+        assert stream["network"] == "hysteria"
+        assert stream["hysteriaSettings"]["auth"] == "pass"
+        assert stream["security"] == "tls"
+
+    def test_xray_vmess_has_no_alter_id(self):
+        """alterId is not part of Xray's VMessAccount schema."""
+        import base64
+
+        payload = base64.b64encode(
+            json.dumps(
+                {
+                    "v": "2", "ps": "M", "add": "v.com", "port": "443",
+                    "id": "00000000-0000-0000-0000-000000000000",
+                    "aid": 0, "scy": "auto", "net": "tcp",
+                }
+            ).encode()
+        ).decode()
+        proxy = next(
+            o for o in json.loads(convert([parse_vmess(f"vmess://{payload}")], Format.XRAY))["outbounds"]
+            if o["protocol"] == "vmess"
+        )
+        user = proxy["settings"]["vnext"][0]["users"][0]
+        assert "alterId" not in user
+        assert user["security"] == "auto"
+
+    def test_xray_burst_observatory_has_ping_config(self):
+        """Xray refuses burstObservatory without pingConfig."""
+        data = json.loads(convert([parse_vless(VLESS_LINK)], Format.XRAY))
+        assert "pingConfig" in data["burstObservatory"]
+
     def test_empty_nodes(self):
         with pytest.raises(ParseError):
             convert([], Format.SINGBOX)
-
 
 # ---------------------------------------------------------------------------
 # Node.to_vless_link round-trip
