@@ -71,9 +71,9 @@ def _is_loopback(ip: str) -> bool:
 async def api_proxy(
     url: str,
     request: Request,
-    format: str = Query("as_is", help="Output format: as_is, json, txt, base64, mihomo"),
-    hwid_off: str = Query("", help="Set to '1' to disable HWID"),
-    seed_random: str = Query("", help="Set to '1' for random seed"),
+    format: str = Query("as_is", description="Output format: as_is, json, txt, base64, mihomo"),
+    hwid_off: str = Query("", description="Set to '1' to disable HWID"),
+    seed_random: str = Query("", description="Set to '1' for random seed"),
 ):
     client_ip = _trusted_client_ip(request)
     if _proxy_rate_limited(client_ip):

@@ -26,7 +26,7 @@ def _device_headers(device: dict, on: bool) -> dict | None:
 
 
 @router.get("/api/extract")
-async def api_extract(input: str = Query(..., help="sing-box JSON or mihomo YAML config")):
+async def api_extract(input: str = Query(..., description="sing-box JSON or mihomo YAML config")):
     try:
         nodes = from_config(input.strip())
         result = to_txt(nodes)
@@ -65,6 +65,7 @@ async def api_convert(body: dict):
         )
 
     res = await process_input(text, fmt=fmt, device_headers=headers, tag_prefix=tag_prefix,
+                              group_by_country=bool(body.get("group_by_country", False)),
                               protocol=body.get("protocol") or None)
 
     if not res.get("ok"):
@@ -83,17 +84,18 @@ async def api_convert(body: dict):
 
 @router.get("/api/convert")
 async def api_convert_get(
-    input: str = Query(..., help="Proxy link, URL, or raw content"),
-    format: str = Query("singbox", help="Output format: singbox, mihomo, txt"),
-    tag_prefix: str = Query("", help="Tag prefix"),
-    protocol: str = Query("", help="Filter by protocol (vless, hysteria2, …)"),
-    device_on: bool = Query(False, help="Send device headers"),
-    os: str = Query("", help="Device OS (android/ios)"),
-    ua: str = Query("", help="User-Agent"),
-    ver: str = Query("", help="App version"),
-    model: str = Query("", help="Device model"),
-    locale: str = Query("", help="Locale e.g. ru_RU"),
-    hwid: str = Query("", help="HWID"),
+    input: str = Query(..., description="Proxy link, URL, or raw content"),
+    format: str = Query("singbox", description="Output format: singbox, mihomo, txt"),
+    tag_prefix: str = Query("", description="Tag prefix"),
+    device_on: bool = Query(False, description="Send device headers"),
+    protocol: str = Query("", description="Filter by protocol (vless, hysteria2, …)"),
+    group_by_country: bool = Query(False, description="Sort/group by country"),
+    os: str = Query("", description="Device OS (android/ios)"),
+    ua: str = Query("", description="User-Agent"),
+    ver: str = Query("", description="App version"),
+    model: str = Query("", description="Device model"),
+    locale: str = Query("", description="Locale e.g. ru_RU"),
+    hwid: str = Query("", description="HWID"),
 ):
     """GET variant — for small inputs only (URL length limit ~2K)."""
     text = input.strip()
@@ -109,6 +111,7 @@ async def api_convert_get(
         )
 
     res = await process_input(text, fmt=fmt, device_headers=headers, tag_prefix=tag_prefix,
+                              group_by_country=group_by_country,
                               protocol=protocol or None)
     if not res.get("ok"):
         return JSONResponse({"ok": False, "error": res.get("error", "Processing failed")}, status_code=400)
