@@ -8,7 +8,7 @@
 **Paste links or a subscription → get a ready config.**
 One parser, three interfaces: CLI, Telegram bot, web.
 Understands 9 input formats — from `vless://` to encrypted `happ://crypt*` —
-and outputs sing-box, mihomo, FlClash or plain text.
+and outputs sing-box, mihomo, FlClash, Xray or plain text.
 
 ```mermaid
 flowchart LR
@@ -171,7 +171,7 @@ For large inputs, use `iter_parse_text()` (generator) instead of `parse_text_inp
 
 `converters.py` uses a ProtocolAdapter pattern (ABC) for format-specific generation:
 - `VLESSAdapter`, `VMessAdapter`, `TrojanAdapter`, `SSAdapter`, `Hysteria2Adapter`, `SSRAAdapter`
-- Each adapter implements `to_clash_dict()`, `to_mihomo_dict()`, `to_singbox_dict()`, `to_link()`
+- Each adapter implements `to_clash_dict()`, `to_mihomo_dict()`, `to_singbox_dict()`, `to_xray_dict()`, `to_link()`
 - YAML output via PyYAML (no manual indentation)
 
 </details>
@@ -179,7 +179,7 @@ For large inputs, use `iter_parse_text()` (generator) instead of `parse_text_inp
 ## Settings
 
 Stored in `~/.config/vtk/settings.json`. Each input type has its own default
-output format: `sub_format`, `link_format`, `config_format`, `txt_format`.
+output format: `sub_format`, `link_format`, `config_format`, `xray_format`, `txt_format`.
 
 ```json
 {
