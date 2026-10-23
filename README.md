@@ -1,21 +1,42 @@
-# VLESS Toolkit (vtk)
+# ⚡ VLESS Toolkit (vtk)
 
-Parse, validate, and convert proxy links & subscriptions between formats.
-Three interfaces — Telegram bot, web (FastAPI), CLI — sharing one core.
+[![CI](https://github.com/aneek0/vtk/actions/workflows/ci.yml/badge.svg)](https://github.com/aneek0/vtk/actions/workflows/ci.yml)
+![version](https://img.shields.io/badge/version-1.1.0-blue)
+![license](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)
+![python](https://img.shields.io/badge/python-3.10%20%7C%203.13-informational)
+
+**Paste links or a subscription → get a ready config.**
+One parser, three interfaces: CLI, Telegram bot, web.
+Understands 9 input formats — from `vless://` to encrypted `happ://crypt*` —
+and outputs sing-box, mihomo, FlClash or plain text.
+
+```mermaid
+flowchart LR
+    A[CLI] --> C
+    B[Telegram bot] --> C
+    D[Web FastAPI] --> C
+    C["core: parse → validate → convert"] --> E[singbox / mihomo / FlClash / txt]
+```
+
+## Highlights
+
+- 🔍 **Auto-detects input type** — link, subscription URL, JSON/YAML config or TXT; no flags to remember
+- 🔐 **Offline decryption** — `happ://crypt*` (RSA) and `incy://crypt*` (AES-256-GCM) links decode without any network call
+- 🌍 **Sort & group by country** — flag emoji in server names drives ordering in every format; FlClash additionally gets per-country `url-test` groups
+- 📱 **Device fingerprinting** — fetch subscriptions with real device headers (UA, HWID, model) via bot `/proxy` menu or web UI, or share `/p/<params>/<url>` passthrough links
+- 🌊 **Streaming parser** — `iter_parse_text()` chews through tens of thousands of links without ballooning memory
 
 ## Supported protocols
 
-- `vless://`
-- `vmess://`
-- `trojan://`
-- `ss://` (SIP002 + legacy)
-- `ssr://`
-- `hysteria2://`
-- `socks://`
-- `happ://crypt*` (auto-decrypted)
-- `incy://crypt*` (auto-decrypted)
+| Input | Notes |
+|---|---|
+| `vless://` · `vmess://` · `trojan://` | full round-trip support |
+| `ss://` · `ssr://` | SIP002 + legacy |
+| `hysteria2://` | with sni/alpn/obfs |
+| `socks://` | with or without auth |
+| `happ://crypt*` · `incy://crypt*` | auto-decrypted offline |
 
-## Supported output formats
+## Output formats
 
 | Format    | Description                                                  |
 |-----------|--------------------------------------------------------------|
@@ -26,43 +47,57 @@ Three interfaces — Telegram bot, web (FastAPI), CLI — sharing one core.
 
 ## Quick start
 
+**Web — 30 seconds:**
+
 ```bash
-git clone <repo-url> && cd vtk
-uv sync --all-extras        # core + bot + web
-uv sync --extra web         # or: just the web interface
-uv sync --extra bot         # or: just the Telegram bot
+git clone https://github.com/aneek0/vtk && cd vtk
+uv sync --extra web
+uv run python -m web.main   # → http://localhost:9000
 ```
 
-Core (installed always): `httpx`, `pycryptodome`, `cryptography`, `pyyaml`.
-Optional: `[bot]` — aiogram; `[web]` — fastapi, uvicorn, python-multipart, jinja2.
-`orjson` is used if present (optional speedup, not required).
+**Bot:** `uv sync --extra bot`, then set `VTK_BOT_TOKEN` (env var or `.env` in the repo root) and `uv run python -m bot.main`.
+
+**CLI** comes with the core:
+
+```bash
+uv run vtk check vless://...                            # validate link
+uv run vtk parse-cmd vless://...                        # parse & display fields
+uv run vtk convert-cmd -l vless://... -f singbox        # convert single link
+uv run vtk sub https://example.com/sub -f flclash       # fetch subscription
+uv run vtk batch links.txt -f mihomo                    # batch convert file
+uv run vtk extract config.json                          # config → share links
+uv run vtk settings show                                # show settings
+uv run vtk settings set sub_format flclash              # change setting
+```
 
 ### Environment variables
 
 | Variable      | Description                                                    |
 |---------------|----------------------------------------------------------------|
-| `VTK_BOT_TOKEN` | Telegram bot token (for bot interface)                       |
+| `VTK_BOT_TOKEN` | Telegram bot token (bot interface) — also read from `.env`   |
 | `VTK_PROXY_BASE` | Base host for passthrough `/p/<params>/<url>` links (default `https://vtk.aneeko.qzz.io`) |
 
-### CLI
+<details>
+<summary>Dependencies</summary>
 
-```bash
-uv run vtk check vless://...                            # validate link
-uv run vtk parse-cmd vless://...                         # parse & display fields
-uv run vtk convert-cmd -l vless://... -f singbox         # convert single link
-uv run vtk sub https://example.com/sub -f flclash        # fetch subscription
-uv run vtk batch links.txt -f mihomo                     # batch convert file
-uv run vtk extract config.json                           # config → share links
-uv run vtk settings show                                 # show settings
-uv run vtk settings set sub_format flclash               # change setting
-```
+Core (always installed): `httpx`, `pycryptodome`, `cryptography`, `pyyaml`.
+Optional: `[bot]` — aiogram; `[web]` — fastapi, uvicorn, python-multipart, jinja2.
+`orjson` is used if present (optional speedup, not required).
+
+</details>
+
+### Web
+
+HTML form + JSON API endpoints:
+
+- `GET /api/convert?input=...&format=singbox` — convert
+- `GET /api/extract?input=...` — config → share links
+- `GET /api/check?link=...` — validate single link
+- `GET /api/device/random` — random device fingerprint params (shared with bot)
+- Convert tab has optional device-header fields (UA/HWID/OS/Ver/Model/Locale) + "Send device headers" toggle + Randomize
+- PROXY tab builds `/p/<params>/<url>` app-links (host = `VTK_PROXY_BASE`)
 
 ### Bot
-
-```bash
-export VTK_BOT_TOKEN=xxx
-uv run python -m bot.main
-```
 
 Commands: `/start`, `/help`, `/settings`, `/proxy`
 
@@ -73,23 +108,7 @@ Features:
 - Import device settings from a pasted web app-link (`https://host/p/android,ver=…,ua=…,hwid=…/https://sub…`)
 - File upload support (documents processed same as text)
 - Rate limiting (3 msg/sec per user)
-- `happ://crypt*` auto-decryption
-- `incy://crypt*` auto-decryption
-
-### Web
-
-```bash
-uv run python -m web.main
-# http://localhost:9000
-```
-
-HTML form + JSON API endpoints:
-- `GET /api/convert?input=...&format=singbox` — convert
-- `GET /api/extract?input=...` — config → share links
-- `GET /api/check?link=...` — validate single link
-- `GET /api/device/random` — random device fingerprint params (shared with bot)
-- Convert tab has optional device-header fields (UA/HWID/OS/Ver/Model/Locale) + "Send device headers" toggle + Randomize
-- PROXY tab builds `/p/<params>/<url>` app-links (host = `VTK_PROXY_BASE`)
+- `happ://crypt*` and `incy://crypt*` auto-decryption
 
 ## Project structure
 
@@ -104,43 +123,57 @@ core/
   incy.py        — incy://crypt* offline decryptor (AES-256-GCM, keymat bundled)
 bot/             — Telegram bot (aiogram 3)
 web/             — FastAPI + HTML form + JSON API
-cli/             — CLI (typer)
+cli/             — CLI (argparse)
 ```
 
-## Core API highlights
+## Core API
 
-### fix_link()
+<details>
+<summary>fix_link()</summary>
+
 Normalizes proxy links for cross-client compatibility (e.g. podkop):
 - Converts `&` → `?` at query start
 - Adds `type=raw` if missing (vless)
 - Normalizes `packet-encoding=` → `packetEncoding=`
 
-### Node validation
-`Node.validate()` checks required fields for each protocol (lightweight, no external deps):
+</details>
+
+<details>
+<summary>Node validation & round-trip</summary>
+
 ```python
 node = parse_link(link)
-node.validate()  # raises ParseError on critical issues
-```
-Called automatically in `parse_text_input()` and `iter_parse_text()`.
-
-### Node round-trip
-Each protocol has a `to_*_link()` method for serialization:
-```python
-node = parse_vless(link)
-link2 = node.to_vless_link()  # round-trip
+node.validate()               # raises ParseError on critical issues
+link2 = parse_vless(link).to_vless_link()   # round-trip
 ```
 
-### Streaming parser
-For large inputs, use `iter_parse_text()` (generator) instead of `parse_text_input()`.
+`validate()` runs automatically in `parse_text_input()` and `iter_parse_text()`.
 
-### Country extraction and sorting
+</details>
+
+<details>
+<summary>Streaming parser</summary>
+
+For large inputs, use `iter_parse_text()` (generator) instead of `parse_text_input()` — constant memory regardless of input size.
+
+</details>
+
+<details>
+<summary>Country extraction and sorting</summary>
+
 `extract_country(name)` detects country from flag emoji (anywhere in the name) or text patterns. The `group_by_country` setting sorts nodes by country in **all** formats (`Other` last, stable within a country) and, for FlClash output, additionally creates per-country proxy groups.
 
-### Protocol adapters (converters)
+</details>
+
+<details>
+<summary>Protocol adapters (converters)</summary>
+
 `converters.py` uses a ProtocolAdapter pattern (ABC) for format-specific generation:
 - `VLESSAdapter`, `VMessAdapter`, `TrojanAdapter`, `SSAdapter`, `Hysteria2Adapter`, `SSRAAdapter`
 - Each adapter implements `to_clash_dict()`, `to_mihomo_dict()`, `to_singbox_dict()`, `to_link()`
 - YAML output via PyYAML (no manual indentation)
+
+</details>
 
 ## Settings
 
@@ -162,7 +195,7 @@ output format: `sub_format`, `link_format`, `config_format`, `txt_format`.
 ## Tests
 
 ```bash
-pytest tests/
+uv run pytest -q
 ```
 
 Covers: fix_link normalization, all protocol parsers, all converters, round-trip, country extraction, error handling.
@@ -177,7 +210,7 @@ uvx pre-commit run --all-files  # git hooks (ruff)
 ```
 
 CI (GitHub Actions): ruff + pytest on Python 3.10 & 3.13 + pip-audit.
-Dependabot watches pip and github-actions weekly.
+Dependabot watches uv and github-actions weekly.
 
 ## Bundled data (`data/`)
 
