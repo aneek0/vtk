@@ -58,8 +58,13 @@ uv run python -m web.main   # → http://localhost:9000
 
 **Bot:** set `VTK_BOT_TOKEN` (env var or `.env` in the repo root) and `uv run python -m bot.main`.
 
-**CLI** comes with the core:
+**CLI** (install as global tool):
+```bash
+uv tool install .
+vtk check vless://...                            # validate link
+```
 
+**CLI** usage via `uv run` (in repo):
 ```bash
 uv run vtk check vless://...                            # validate link
 uv run vtk parse-cmd vless://...                        # parse & display fields
