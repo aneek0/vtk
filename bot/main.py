@@ -32,6 +32,19 @@ from core.settings import Settings, load_settings, save_settings
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Load .env from repo root (no python-dotenv dep: TOKEN is the only required var)
+if not os.environ.get("VTK_BOT_TOKEN"):
+    _env_file = os.path.join(os.path.dirname(__file__), "..", ".env")
+    try:
+        with open(_env_file) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, _, v = line.partition("=")
+                    os.environ.setdefault(k.strip(), v.strip().strip("'\""))
+    except OSError:
+        pass
+
 TOKEN = os.environ.get("VTK_BOT_TOKEN", "")
 router = Router()
 
@@ -108,6 +121,12 @@ def _main_kb(s) -> InlineKeyboardMarkup:
             InlineKeyboardButton(
                 text="📱 Proxy device",
                 callback_data=CB_PROXY,
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                text=f"{'✅' if s.group_by_country else '❌'} Group by country",
+                callback_data="group_by_country",
             )
         ],
         [
@@ -374,6 +393,15 @@ async def cb_set_format(callback: CallbackQuery):
 async def cb_toggle_passthrough(callback: CallbackQuery):
     s = load_settings()
     s.sub_passthrough = not s.sub_passthrough
+    save_settings(s)
+    text = "⚙️ <b>Settings</b>\n\nSelect output format for each input type:"
+    await callback.message.edit_text(text, reply_markup=_main_kb(s), parse_mode=ParseMode.HTML)
+
+
+@router.callback_query(F.data == "group_by_country")
+async def cb_toggle_group_country(callback: CallbackQuery):
+    s = load_settings()
+    s.group_by_country = not s.group_by_country
     save_settings(s)
     await callback.answer()
     text = "⚙️ <b>Settings</b>\n\nSelect output format for each input type:"

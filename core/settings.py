@@ -47,7 +47,7 @@ class Settings:
     # Skip TLS certificate verification when fetching subscriptions
     insecure_tls: bool = False
 
-    # Group FlClash proxy-groups by country (from node name emoji)
+    # Sort nodes by country (all formats) + per-country FlClash proxy-groups
     group_by_country: bool = False
 
     # Subscription output mode

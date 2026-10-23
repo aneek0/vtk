@@ -9,7 +9,7 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='28' font-size='28'>⚡</text></svg>">
 <link rel="preload" href="/static/fonts/onest-300_800-latin.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/static/fonts/onest-300_800-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=7">
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -87,6 +87,11 @@
         </div>
       </div>
 
+      <div class="toggle-row" style="margin-bottom:8px">
+        <span class="field-label">Sort / group by country (flag emoji in server name)</span>
+        <label class="toggle-inline"><input type="checkbox" class="switch" id="convertGroupCountry" aria-label="Sort and group by country"></label>
+      </div>
+
       <details class="card">
         <summary><svg class="mi"><use href="#i-swap_horiz"/></svg>Device headers<svg class="mi chev"><use href="#i-arrow_drop_down"/></svg></summary>
         <div class="card-body">
@@ -142,7 +147,7 @@
         <div class="card-body" style="padding-top:16px">
           <div class="toggle-row">
             <span class="subhead" id="serversTitle">Servers</span>
-            <button class="copy-btn" onclick="copyAllServers()">COPY ALL</button>
+            <button class="copy-btn" onclick="copyAllServers(this)">COPY ALL</button>
           </div>
           <div id="serverFilters" class="proto-filters" style="display:none"></div>
           <div id="convertServers" class="servers-list"></div>
@@ -253,6 +258,6 @@
   </footer>
 </div>
 
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=7"></script>
 </body>
 </html>

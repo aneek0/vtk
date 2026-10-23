@@ -6,6 +6,7 @@ import pytest
 
 from core.converters import Format, convert
 from core.logic import (
+    Node,
     ParseError,
     extract_country,
     fix_link,
@@ -17,6 +18,7 @@ from core.logic import (
     parse_trojan,
     parse_vless,
     parse_vmess,
+    sort_nodes_by_country,
 )
 
 # ---------------------------------------------------------------------------
@@ -275,6 +277,29 @@ class TestExtractCountry:
         assert extract_country("Some Server") == "Other"
         assert extract_country("") == "Other"
 
+
+    def test_flag_anywhere(self):
+        assert extract_country("Frankfurt 🇩🇪") == "DE"
+
+    def test_sort_nodes_by_country(self):
+        nodes = [
+            Node(protocol="vless", uuid="u1", address="1.1.1.1", port=443, name="🇺🇸 NY"),
+            Node(protocol="vless", uuid="u2", address="2.2.2.2", port=443, name="Home"),
+            Node(protocol="vless", uuid="u3", address="3.3.3.3", port=443, name="Frankfurt 🇩🇪"),
+            Node(protocol="vless", uuid="u4", address="4.4.4.4", port=443, name="🇩🇪 Berlin"),
+        ]
+        assert [n.name for n in sort_nodes_by_country(nodes)] == [
+            "Frankfurt 🇩🇪", "🇩🇪 Berlin", "🇺🇸 NY", "Home",
+        ]
+
+    def test_convert_sorts_all_formats(self):
+        nodes = [
+            Node(protocol="vless", uuid="u1", address="1.1.1.1", port=443, name="🇺🇸 NY"),
+            Node(protocol="vless", uuid="u2", address="2.2.2.2", port=443, name="Home"),
+            Node(protocol="vless", uuid="u3", address="3.3.3.3", port=443, name="🇩🇪 Berlin"),
+        ]
+        txt = convert(nodes, Format.TXT, group_by_country=True)
+        assert txt.splitlines()[0].endswith("#%F0%9F%87%A9%F0%9F%87%AA%20Berlin")
 
 # ---------------------------------------------------------------------------
 # Converters

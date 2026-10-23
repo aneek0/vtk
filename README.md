@@ -133,8 +133,8 @@ link2 = node.to_vless_link()  # round-trip
 ### Streaming parser
 For large inputs, use `iter_parse_text()` (generator) instead of `parse_text_input()`.
 
-### Country extraction
-`extract_country(name)` detects country from flag emoji or text patterns in node names. Used by FlClash `group_by_country` to create per-country proxy groups.
+### Country extraction and sorting
+`extract_country(name)` detects country from flag emoji (anywhere in the name) or text patterns. The `group_by_country` setting sorts nodes by country in **all** formats (`Other` last, stable within a country) and, for FlClash output, additionally creates per-country proxy groups.
 
 ### Protocol adapters (converters)
 `converters.py` uses a ProtocolAdapter pattern (ABC) for format-specific generation:

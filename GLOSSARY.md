@@ -52,3 +52,13 @@ instead of assembling their own pipeline.
 Where untrusted data enters: user input strings, subscription URLs, upstream
 responses. Network policy (`core/net.py`), decryption and settings parsing sit
 on it; each has exactly one implementation.
+
+## Country
+Country code (`RU`, `DE`, …) extracted from a node name by
+`core.logic.extract_country` — flag emoji anywhere in the name, else text
+patterns. No match → `Other`.
+
+## Group by country
+The `group_by_country` setting. When on, `convert()` sorts nodes by country
+(all formats; `Other` last, stable within a country) and, for FlClash output
+only, additionally builds per-country `url-test` proxy-groups.

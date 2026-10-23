@@ -40,10 +40,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Static files
+# Static files — no-cache: always revalidate, never serve stale JS/CSS after updates
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_static_dir):
-    app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+
+
+    class _NoCacheStatic(StaticFiles):
+        async def get_response(self, path, scope):
+            resp = await super().get_response(path, scope)
+            resp.headers["Cache-Control"] = "no-cache"
+            return resp
+
+    app.mount("/static", _NoCacheStatic(directory=_static_dir), name="static")
 
 # Routers
 app.include_router(frontend_router)

@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- `group_by_country` now sorts nodes by country (flag emoji anywhere in the
+  server name) in **all** output formats — `Other` last, stable within a
+  country — in addition to per-country FlClash proxy groups. Toggle in bot
+  settings, web convert form, CLI `settings`.
+
 ### Security
 - TLS verification is on for every subscription fetch; `insecure_tls` setting
   is the explicit opt-out (previously `verify=False` everywhere).

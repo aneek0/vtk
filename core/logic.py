@@ -416,14 +416,20 @@ def extract_country(name: str) -> str:
         return "Other"
 
     for flag, code in _FLAG_MAP.items():
-        if name.startswith(flag):
+        if flag in name:
             return code
 
     for pattern, code in _COUNTRY_TEXT_PATTERNS:
         if pattern.search(name):
             return code
-
     return "Other"
+
+
+def sort_nodes_by_country(nodes: list) -> list:
+    """Sort nodes by country of node name: alphabetical country codes
+    first, no-country ("Other") last. Stable within a country."""
+    return sorted(nodes, key=lambda n: (extract_country(n.name or "") == "Other",
+                                        extract_country(n.name or "")))
 
 
 # ---------------------------------------------------------------------------
@@ -1109,7 +1115,7 @@ def _node_to_dict(node: Node) -> dict:
 
 async def process_input(raw: str, fmt=None, device_headers: dict | None = None,
                         timeout: int | None = None, tag_prefix: str = "",
-                        protocol: str | None = None) -> dict:
+                        protocol: str | None = None, group_by_country: bool | None = None) -> dict:
     """Single unified entry point used by bot, web and CLI.
 
     Pipeline (all decryption centralized here):
@@ -1202,8 +1208,12 @@ async def process_input(raw: str, fmt=None, device_headers: dict | None = None,
                           if any(ln.startswith(p) for p in share_prefixes)]
             fmt = s.txt_format if len(link_lines) > 1 else s.link_format
 
+    if group_by_country is None:
+        group_by_country = s.group_by_country
+    if group_by_country:
+        nodes = sort_nodes_by_country(nodes)
     try:
-        result = convert(nodes, fmt, tag_prefix=tag_prefix, group_by_country=s.group_by_country)
+        result = convert(nodes, fmt, tag_prefix=tag_prefix, group_by_country=group_by_country)
     except ParseError as e:
         return {"ok": False, "error": str(e)}
 

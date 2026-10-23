@@ -12,7 +12,7 @@ import base64
 from abc import ABC
 from enum import Enum
 
-from .logic import Node, ParseError, extract_country
+from .logic import Node, ParseError, extract_country, sort_nodes_by_country
 
 try:
     import orjson
@@ -937,11 +937,14 @@ def convert(
         nodes: List of parsed Node objects
         fmt: Target format
         tag_prefix: Prefix for auto-generated names
-        group_by_country: Create per-country proxy groups (FlClash only)
+        group_by_country: Sort nodes by country (all formats) and create
+            per-country proxy-groups (FlClash only)
 
     Returns:
         Formatted string ready for use
     """
+    if group_by_country and fmt != Format.FLCLASH:
+        nodes = sort_nodes_by_country(nodes)
     if fmt == Format.SINGBOX:
         return to_singbox(nodes, tag_prefix)
     elif fmt == Format.MIHOMO:

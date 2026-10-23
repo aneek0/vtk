@@ -278,7 +278,7 @@ def cmd_settings_show(args):
     print(f"Link format   : {s.link_format.value}")
     print(f"Config format : {s.config_format.value}")
     print(f"TXT format    : {s.txt_format.value}")
-    print(f"Group by country: {s.group_by_country}")
+    print(f"Sort/group by country: {s.group_by_country}")
     print(f"Tag prefix    : {s.tag_prefix or '(none)'}")
     print(f"Timeout       : {s.timeout}s")
     print(f"Sub passthrough: {s.sub_passthrough}")
@@ -292,7 +292,7 @@ def cmd_settings_interactive(args):
     print(f"  2. 🔗 Links → {s.link_format.value}")
     print(f"  3. ⚙️ Configs → {s.config_format.value}")
     print(f"  4. 📝 TXT → {s.txt_format.value}")
-    print(f"  5. 🔄 Group by country: {'✅' if s.group_by_country else '❌'}")
+    print(f"  5. 🔄 Sort/group by country: {'✅' if s.group_by_country else '❌'}")
     print(f"  6. 🔗 Sub passthrough: {'✅' if s.sub_passthrough else '❌'}")
     print()
 
