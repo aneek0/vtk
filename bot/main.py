@@ -17,7 +17,9 @@ from aiogram.types import (
     Message,
 )
 
+from bot.state import PendingConversion, PendingStore
 from core.converters import Format
+from core.decryptors import decrypt_input
 from core.fingerprint import (
     generate_device_fingerprint,
     get_proxy_base,
@@ -26,7 +28,9 @@ from core.fingerprint import (
     random_device,
     to_params_string,
 )
-from core.logic import decrypt_input, process_input
+from core.formats import FORMATS, SECTIONS, extension
+from core.input import InputKind, classify
+from core.logic import process_input, render_nodes
 from core.settings import Settings, load_settings, save_settings
 
 logging.basicConfig(level=logging.INFO)
@@ -66,24 +70,40 @@ def _check_rate_limit(user_id: int) -> bool:
     timestamps.append(now)
     return True
 
-# Callback prefixes
+# Section callback prefixes, keyed by the Settings field they edit.
 CB_SUB_FMT = "sub"
 CB_LINK_FMT = "link"
 CB_CONFIG_FMT = "cfg"
 CB_TXT_FMT = "txt"
 CB_PROXY = "proxy"
-_pending_inputs: dict[str, tuple] = {}
+
+_SECTION_PREFIXES = {
+    "sub_format": CB_SUB_FMT,
+    "link_format": CB_LINK_FMT,
+    "config_format": CB_CONFIG_FMT,
+    "txt_format": CB_TXT_FMT,
+}
+_PREFIX_TO_KEY = {prefix: key for key, prefix in _SECTION_PREFIXES.items()}
+_SECTION_UI = {
+    "sub_format": "📋 Subscriptions",
+    "link_format": "🔗 Links",
+    "config_format": "⚙️ Configs",
+    "txt_format": "📝 TXT files",
+}
+
+# Parsed batches waiting for a protocol pick, keyed by (chat_id, message_id).
+PENDING = PendingStore()
 
 
 def _format_kb(prefix: str, current: Format) -> InlineKeyboardMarkup:
     """Build format selection keyboard for a given section prefix."""
     rows = []
-    for fmt in Format:
-        mark = "✅" if fmt == current else "  "
+    for fmt_spec in FORMATS:
+        mark = "✅" if fmt_spec.fmt == current else "  "
         rows.append([
             InlineKeyboardButton(
-                text=f"{mark} {fmt.value}",
-                callback_data=f"{prefix}:{fmt.value}",
+                text=f"{mark} {fmt_spec.fmt.value}",
+                callback_data=f"{prefix}:{fmt_spec.fmt.value}",
             )
         ])
     rows.append([InlineKeyboardButton(text="🔙 Back", callback_data="back")])
@@ -95,28 +115,13 @@ def _main_kb(s) -> InlineKeyboardMarkup:
     rows = [
         [
             InlineKeyboardButton(
-                text=f"📋 Subs → {s.sub_format.value}",
-                callback_data=CB_SUB_FMT,
+                text=f"{_SECTION_UI[section.key]} → {getattr(s, section.key).value}",
+                callback_data=_SECTION_PREFIXES[section.key],
             )
-        ],
-        [
-            InlineKeyboardButton(
-                text=f"🔗 Links → {s.link_format.value}",
-                callback_data=CB_LINK_FMT,
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text=f"⚙️ Configs → {s.config_format.value}",
-                callback_data=CB_CONFIG_FMT,
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                text=f"📝 TXT → {s.txt_format.value}",
-                callback_data=CB_TXT_FMT,
-            )
-        ],
+        ]
+        for section in SECTIONS
+    ]
+    rows += [
         [
             InlineKeyboardButton(
                 text="📱 Proxy device",
@@ -192,28 +197,19 @@ async def _reply_as_file(message, content: str, filename: str):
     await message.reply_document(f)
 
 
-def _detect_input(text: str) -> str:
-    """Detect input type: 'sub', 'config', 'link'."""
-    text = text.strip()
-    if text.startswith(("http://", "https://")):
-        return "sub"
-    if text.startswith("{") or "proxies:" in text or text.startswith("- name:"):
-        return "config"
-    return "link"
-
-
-def _resolve_format(s, input_type: str) -> Format:
-    """Get output format for detected input type."""
-    fmt_map = {
-        "sub": s.sub_format,
-        "link": s.link_format,
-        "config": s.config_format,
-    }
-    return fmt_map.get(input_type, s.link_format)
-
-
-def _fmt_ext(fmt: Format) -> str:
-    return {"singbox": "json", "mihomo": "yaml", "flclash": "yaml", "txt": "txt", "xray": "json"}.get(fmt.value, "txt")
+async def _deliver_result(message, result: str, name: str, fmt: Format,
+                          empty_hint: str = "nothing to output") -> None:
+    """Send converted output: YAML and long results as a file, else inline."""
+    ext = extension(fmt)
+    safe_name = "".join(
+        c for c in name if c.isalnum() or c in "._- "
+    )[:50].strip() or "config"
+    if ext == "yaml" or len(result) > 3000:
+        await _reply_as_file(message, result, f"{safe_name}.{ext}")
+    elif result.strip():
+        await message.reply(f"<pre>{result}</pre>", parse_mode=ParseMode.HTML)
+    else:
+        await message.reply(f"❌ Empty result — {empty_hint}")
 
 
 # ---------------------------------------------------------------------------
@@ -298,95 +294,67 @@ async def cmd_proxy(message: Message):
 # Callbacks
 # ---------------------------------------------------------------------------
 
-@router.callback_query(F.data.in_({CB_SUB_FMT, CB_LINK_FMT, CB_CONFIG_FMT, CB_TXT_FMT}))
+@router.callback_query(F.data.in_(set(_PREFIX_TO_KEY)))
 async def cb_section(callback: CallbackQuery):
     s = load_settings()
-    section = callback.data
-
-    fmt_map = {
-        CB_SUB_FMT: ("📋 Subscriptions", s.sub_format, CB_SUB_FMT),
-        CB_LINK_FMT: ("🔗 Links", s.link_format, CB_LINK_FMT),
-        CB_CONFIG_FMT: ("⚙️ Configs", s.config_format, CB_CONFIG_FMT),
-        CB_TXT_FMT: ("📝 TXT files", s.txt_format, CB_TXT_FMT),
-    }
-
-    title, current, prefix = fmt_map[section]
-    text = f"{title}\nCurrent: <code>{current.value}</code>\n\nSelect output format:"
+    key = _PREFIX_TO_KEY[callback.data]
+    current = getattr(s, key)
+    text = (f"{_SECTION_UI[key]}\nCurrent: <code>{current.value}</code>\n\n"
+            "Select output format:")
     await callback.message.edit_text(
-        text, reply_markup=_format_kb(prefix, current), parse_mode=ParseMode.HTML,
+        text, reply_markup=_format_kb(callback.data, current),
+        parse_mode=ParseMode.HTML,
     )
     await callback.answer()
 
-@router.callback_query(F.data.regexp(r"^proto:\d{4}:(.+)$"))
+@router.callback_query(F.data.regexp(r"^proto:(.+)$"))
 async def cb_protocol(callback: CallbackQuery):
-    """Re-run conversion for the picked protocol and deliver output."""
-    parts = callback.data.split(":", 2)
-    if len(parts) < 3:
-        await callback.answer("Bad request", show_alert=False)
-        return
-    key, proto = parts[1], parts[2]
-    entry = _pending_inputs.pop(key, None)
-    if not entry:
+    """Render the batch already parsed for this keyboard as the picked protocol."""
+    proto = callback.data.split(":", 1)[1]
+    key = (callback.message.chat.id, callback.message.message_id)
+    pending = PENDING.take(key)
+    if pending is None:
         await callback.answer("⏳ Expired — send the subscription again", show_alert=True)
         return
-    text, fmt = entry
     await callback.answer()
-    s = load_settings()
-    device_headers = None
-    if s.proxy_headers_on:
-        device_headers = generate_device_fingerprint(
-            ua=s.proxy_ua, hwid=s.proxy_hwid if s.proxy_hwid_on else "",
-            os_name=s.proxy_os, ver=s.proxy_ver, model=s.proxy_model,
-            locale=s.proxy_locale,
-        )
     status = await callback.message.edit_text(
-        f"⏳ Converting {proto} → {fmt.value}...", reply_markup=None
+        f"⏳ Converting {proto} → {pending.fmt.value}...", reply_markup=None
     )
-    res = await process_input(text, fmt=fmt, device_headers=device_headers, protocol=None if proto == "all" else proto)
+    res = render_nodes(
+        pending.nodes, pending.fmt,
+        protocol=None if proto == "all" else proto,
+        group_by_country=pending.group_by_country,
+        tag_prefix=pending.tag_prefix,
+        sub_name=pending.sub_name,
+    )
     if not res.get("ok"):
         await status.edit_text(f"❌ {res.get('error', 'Unknown error')}")
         return
-    result = res["result"]
-    ext = _fmt_ext(fmt)
-    if res["sub_name"]:
-        safe_name = "".join(c for c in res["sub_name"] if c.isalnum() or c in "._- ")[:50].strip()
-        filename = f"{safe_name}_{proto}.{ext}"
-    else:
-        filename = f"config_{proto}.{ext}"
-    if ext == "yaml" or len(result) > 3000:
-        await _reply_as_file(callback.message, result, filename)
-    elif result.strip():
-        await callback.message.reply(f"<pre>{result}</pre>", parse_mode=ParseMode.HTML)
-    else:
-        await callback.message.reply(f"❌ Empty result — {res['nodes']} nodes")
+    suffix = f"_{proto}" if proto != "all" else ""
+    await _deliver_result(
+        callback.message, res["result"], f"{pending.sub_name or 'config'}{suffix}",
+        pending.fmt,
+    )
 
 
-@router.callback_query(F.data.startswith((CB_SUB_FMT + ":", CB_LINK_FMT + ":", CB_CONFIG_FMT + ":", CB_TXT_FMT + ":")))
+@router.callback_query(F.data.startswith(
+    tuple(f"{prefix}:" for prefix in _PREFIX_TO_KEY)
+))
 async def cb_set_format(callback: CallbackQuery):
-    parts = callback.data.split(":")
-    if len(parts) != 2:
+    prefix, sep, fmt_str = callback.data.partition(":")
+    if not sep or prefix not in _PREFIX_TO_KEY:
         await callback.answer()
         return
-
-    prefix, fmt_str = parts
     fmt = Format(fmt_str)
     s = load_settings()
-
-    if prefix == CB_SUB_FMT:
-        s.sub_format = fmt
-    elif prefix == CB_LINK_FMT:
-        s.link_format = fmt
-    elif prefix == CB_CONFIG_FMT:
-        s.config_format = fmt
-    elif prefix == CB_TXT_FMT:
-        s.txt_format = fmt
+    setattr(s, _PREFIX_TO_KEY[prefix], fmt)
 
     save_settings(s)
     await callback.answer(f"✅ → {fmt.value}")
 
-    # Return to main menu
     text = "⚙️ <b>Settings</b>\n\nSelect output format for each input type:"
-    await callback.message.edit_text(text, reply_markup=_main_kb(s), parse_mode=ParseMode.HTML)
+    await callback.message.edit_text(text, reply_markup=_main_kb(s),
+                                     parse_mode=ParseMode.HTML)
 
 
 @router.callback_query(F.data == "sub_passthrough")
@@ -540,11 +508,11 @@ async def _process_input(message, text: str):
         )
         device_headers = fp
 
-    # Single unified core path: decrypt -> detect -> fetch/parse -> convert.
-    # Detection runs on the *decrypted* text inside process_input, so
+    # Single unified core path: decrypt -> classify -> fetch/parse -> convert.
+    # Classification runs on the *decrypted* text inside process_input, so
     # incy://-wrapped subscriptions are correctly treated as a sub.
     status_msg = None
-    if _detect_input(decrypt_input(text)) == "sub":
+    if classify(decrypt_input(text)) is InputKind.SUB:
         status_msg = await message.reply("⏳ Fetching subscription...")
 
     res = await process_input(text, device_headers=device_headers)
@@ -563,21 +531,29 @@ async def _process_input(message, text: str):
     content = res["content"]
     fmt = Format(res["format"])
 
-    # Protocol selection — inline keyboard when subscription mixes protocols
+    # Protocol selection — inline keyboard when the batch mixes protocols.
     protocols = res.get("protocols") or {}
     if len(protocols) > 1:
-        cb = f"proto:{hash(text) & 0xFFFF:04x}"
-        _pending_inputs[cb] = (text, fmt)
         rows = [[InlineKeyboardButton(
             text=f"{p} ({cnt})" if p != "all" else f"all ({res.get('total_nodes', nodes)})",
-            callback_data=f"{cb}:{p}",
+            callback_data=f"proto:{p}",
         )] for p, cnt in [("all", res.get("total_nodes", nodes)), *protocols.items()]]
         kb = InlineKeyboardMarkup(inline_keyboard=rows)
         msg_txt = f"📋 {nodes} nodes «{sub_name}» — select protocol:"
         if status_msg:
-            await status_msg.edit_text(msg_txt, reply_markup=kb)
+            prompt = await status_msg.edit_text(msg_txt, reply_markup=kb)
         else:
-            await message.reply(msg_txt, reply_markup=kb)
+            prompt = await message.reply(msg_txt, reply_markup=kb)
+        # Keyed by the message carrying the keyboard: no hashing, no refetch.
+        PENDING.store(
+            (prompt.chat.id, prompt.message_id),
+            PendingConversion(
+                nodes=res["parsed"],
+                protocols=protocols,
+                fmt=fmt,
+                sub_name=sub_name,
+            ),
+        )
         return
 
     # Passthrough: send proxy URL + raw JSON file
@@ -606,21 +582,8 @@ async def _process_input(message, text: str):
     logger.info(f"Total processing: {(t_done - t_start)*1000:.0f}ms")
     logger.info(f"Parsed {nodes} nodes, format={fmt.value}")
 
-    ext = _fmt_ext(fmt) if fmt else "json"
-    logger.info(f"Result: {len(result)} chars, ext={ext}")
-    # Build filename: use subscription name if available
-    if sub_name:
-        safe_name = "".join(c for c in sub_name if c.isalnum() or c in "._- ")[:50].strip()
-        filename = f"{safe_name}.{ext}"
-    else:
-        filename = f"config.{ext}"
-    # YAML configs (mihomo/flclash) always as file
-    if ext == "yaml" or len(result) > 3000:
-        await _reply_as_file(message, result, filename)
-    elif result.strip():
-        await message.reply(f"<pre>{result}</pre>", parse_mode=ParseMode.HTML)
-    else:
-        await message.reply(f"❌ Empty result — {nodes} nodes parsed but nothing to output")
+    await _deliver_result(message, result, sub_name or "config", fmt,
+                          empty_hint=f"{nodes} nodes parsed but nothing to output")
 
 
 @router.message(F.document)

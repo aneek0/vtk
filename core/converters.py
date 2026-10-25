@@ -1,18 +1,17 @@
 """Converters: sing-box JSON, mihomo YAML, FlClash YAML, plain txt.
 
 Architecture (inspired by sunway910/clashconverter):
-- ProtocolAdapter pattern: each protocol has an adapter class with
-  to_clash_dict() / to_mihomo_dict() / to_singbox_dict() / to_link()
+  to_clash_dict() / to_mihomo_dict() / to_singbox_dict()
 - Universal _node_to_dict() → format-specific adapters add extra fields
 - Pydantic-style validation via dataclass models (lightweight, no dependency)
 - YAML serialization via PyYAML (no manual indentation)
 """
 
-import base64
 from abc import ABC
 from enum import Enum
 
 from .logic import Node, ParseError, extract_country, sort_nodes_by_country
+from .share import render_link
 
 try:
     import orjson
@@ -108,10 +107,6 @@ class ProtocolAdapter(ABC):  # noqa: B024 - marker base; subclasses fill in meth
         """Convert node to sing-box dict format."""
         return _base_singbox_dict(node)
 
-    def to_link(self, node: Node) -> str:
-        """Convert node back to share link."""
-        return ""
-
 
 class VLESSAdapter(ProtocolAdapter):
     def to_clash_dict(self, node: Node) -> dict:
@@ -139,10 +134,6 @@ class VLESSAdapter(ProtocolAdapter):
         _fill_singbox_transport(obj, node)
         _fill_singbox_tls(obj, node)
         return obj
-
-    def to_link(self, node: Node) -> str:
-        return node.to_vless_link()
-
 
 class VMessAdapter(ProtocolAdapter):
     @property
@@ -174,32 +165,6 @@ class VMessAdapter(ProtocolAdapter):
                 obj["tls"]["server_name"] = node.sni
         return obj
 
-    def to_link(self, node: Node) -> str:
-        # VMess uses base64-encoded JSON
-        ps = node.name
-        addr = node.address
-        port = node.port
-        uuid = node.uuid
-        aid = node.vmess_aid
-        scy = node.vmess_scy
-        net = node.net
-        tls = "tls" if node.tls else ""
-        vmess_obj = {
-            "v": "2",
-            "ps": ps,
-            "add": addr,
-            "port": port,
-            "id": uuid,
-            "aid": aid,
-            "scy": scy,
-            "net": net,
-            "tls": tls,
-        }
-        json_str = _json_dumps(vmess_obj).replace("\n", "")
-        encoded = base64.b64encode(json_str.encode()).decode()
-        return f"vmess://{encoded}"
-
-
 class TrojanAdapter(ProtocolAdapter):
     @property
     def protocol(self) -> str:
@@ -230,10 +195,6 @@ class TrojanAdapter(ProtocolAdapter):
         _fill_singbox_transport(obj, node)
         return obj
 
-    def to_link(self, node: Node) -> str:
-        return node.to_trojan_link()
-
-
 class SSAdapter(ProtocolAdapter):
     @property
     def protocol(self) -> str:
@@ -254,10 +215,6 @@ class SSAdapter(ProtocolAdapter):
             "method": node.ss_method,
             "password": node.ss_password,
         }
-
-    def to_link(self, node: Node) -> str:
-        return node.to_ss_link()
-
 
 class Hysteria2Adapter(ProtocolAdapter):
     @property
@@ -280,10 +237,6 @@ class Hysteria2Adapter(ProtocolAdapter):
         if node.sni:
             obj["tls"]["server_name"] = node.sni
         return obj
-
-    def to_link(self, node: Node) -> str:
-        return node.to_hysteria2_link()
-
 
 class SOCKSAdapter(ProtocolAdapter):
     @property
@@ -921,16 +874,7 @@ def _build_xray_stream(node: Node) -> dict:
 
 def to_txt(nodes: list[Node], tag_prefix: str = "") -> str:
     """Generate a list of share links (one per node)."""
-    links = []
-    for node in nodes:
-        if node.protocol == "error":
-            continue
-        adapter = get_adapter(node.protocol)
-        if adapter:
-            link = adapter.to_link(node)
-            if link:
-                links.append(link)
-    return "\n".join(links)
+    return "\n".join(link for link in (render_link(n) for n in nodes) if link)
 
 
 # ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@ from fastapi.responses import JSONResponse
 
 from core.converters import Format, to_txt
 from core.fingerprint import generate_device_fingerprint
+from core.formats import names
 from core.logic import ParseError, process_input
 from core.reverse import from_config
 
@@ -10,7 +11,6 @@ router = APIRouter()
 
 
 def _device_headers(device: dict, on: bool) -> dict | None:
-
     """Build device headers from a dict of device params if `on` is True."""
     if not on:
         return None
@@ -23,6 +23,54 @@ def _device_headers(device: dict, on: bool) -> dict | None:
         locale=device.get("locale", ""),
     )
 
+
+async def _convert_request(
+    text: str,
+    fmt_str: str,
+    *,
+    tag_prefix: str = "",
+    device: dict | None = None,
+    device_on: bool = False,
+    protocol: str = "",
+    group_by_country: bool = False,
+) -> dict:
+    """Run one conversion and build the JSON response both routes return.
+
+    GET and POST differ only in how they read their parameters; the work — and
+    the response contract — lives here so the two can never drift again.
+    """
+    try:
+        fmt = Format(fmt_str)
+    except ValueError:
+        return JSONResponse(
+            {"ok": False,
+             "error": f"Unknown format: {fmt_str}. Valid: {', '.join(names())}"},
+            status_code=400,
+        )
+
+    res = await process_input(
+        text,
+        fmt=fmt,
+        device_headers=_device_headers(device or {}, device_on),
+        tag_prefix=tag_prefix,
+        group_by_country=group_by_country,
+        protocol=protocol or None,
+    )
+    if not res.get("ok"):
+        return JSONResponse(
+            {"ok": False, "error": res.get("error", "Processing failed")},
+            status_code=400,
+        )
+    return {
+        "ok": True,
+        "format": res["format"],
+        "nodes": res["nodes"],
+        "total_nodes": res.get("total_nodes", res["nodes"]),
+        "protocols": res.get("protocols", {}),
+        "result": res["result"],
+        "sub_headers": res["sub_headers"],
+        "servers": res["servers"],
+    }
 
 
 @router.get("/api/extract")
@@ -44,42 +92,18 @@ async def api_convert(body: dict):
                 "device": {"os": "android", "ua": "...", "ver": "...",
                            "model": "...", "locale": "...", "hwid": "..."}}
     """
-
-
     text = (body.get("input") or "").strip()
     if not text:
         return JSONResponse({"ok": False, "error": "Missing 'input' field"}, status_code=400)
-    fmt_str = body.get("format", "singbox")
-    tag_prefix = body.get("tag_prefix", "")
-    device = body.get("device") or {}
-    device_on = bool(body.get("device_on", False))
-    headers = _device_headers(device, device_on)
-
-    # Resolve + validate the requested output format (None -> per-type default)
-    try:
-        fmt = Format(fmt_str)
-    except ValueError:
-        return JSONResponse(
-            {"ok": False, "error": f"Unknown format: {fmt_str}. Valid: singbox, mihomo, txt, flclash, xray"},
-            status_code=400,
-        )
-
-    res = await process_input(text, fmt=fmt, device_headers=headers, tag_prefix=tag_prefix,
-                              group_by_country=bool(body.get("group_by_country", False)),
-                              protocol=body.get("protocol") or None)
-
-    if not res.get("ok"):
-        return JSONResponse({"ok": False, "error": res.get("error", "Processing failed")}, status_code=400)
-
-    sub_headers = res["sub_headers"]
-    servers = res["servers"]
-    result = res["result"]
-    return {
-        "ok": True, "format": res["format"], "nodes": res["nodes"],
-        "total_nodes": res.get("total_nodes", res["nodes"]),
-        "protocols": res.get("protocols", {}), "result": result,
-        "sub_headers": sub_headers, "servers": servers,
-    }
+    return await _convert_request(
+        text,
+        body.get("format", "singbox"),
+        tag_prefix=body.get("tag_prefix", ""),
+        device=body.get("device") or {},
+        device_on=bool(body.get("device_on", False)),
+        protocol=body.get("protocol", ""),
+        group_by_country=bool(body.get("group_by_country", False)),
+    )
 
 
 @router.get("/api/convert")
@@ -99,33 +123,24 @@ async def api_convert_get(
 ):
     """GET variant — for small inputs only (URL length limit ~2K)."""
     text = input.strip()
-    device = {"os": os, "ua": ua, "ver": ver, "model": model, "locale": locale, "hwid": hwid}
-    headers = _device_headers(device, device_on)
-
-    try:
-        fmt = Format(format)
-    except ValueError:
-        return JSONResponse(
-            {"ok": False, "error": f"Unknown format: {format}. Valid: singbox, mihomo, txt, flclash, xray"},
-            status_code=400,
-        )
-
-    res = await process_input(text, fmt=fmt, device_headers=headers, tag_prefix=tag_prefix,
-                              group_by_country=group_by_country,
-                              protocol=protocol or None)
-    if not res.get("ok"):
-        return JSONResponse({"ok": False, "error": res.get("error", "Processing failed")}, status_code=400)
-    return {
-        "ok": True, "format": res["format"], "nodes": res["nodes"],
-        "total_nodes": res.get("total_nodes", res["nodes"]),
-        "protocols": res.get("protocols", {}), "result": res["result"],
-        "sub_headers": res["sub_headers"], "servers": res["servers"],
-    }
+    if not text:
+        return JSONResponse({"ok": False, "error": "Missing 'input' field"}, status_code=400)
+    return await _convert_request(
+        text,
+        format,
+        tag_prefix=tag_prefix,
+        device={"os": os, "ua": ua, "ver": ver, "model": model,
+                "locale": locale, "hwid": hwid},
+        device_on=device_on,
+        protocol=protocol,
+        group_by_country=group_by_country,
+    )
 
 
 @router.get("/api/check")
 async def api_check(link: str = Query(...)):
     from core.logic import parse_link
+
     try:
         node = parse_link(link)
         return {"ok": True, "protocol": node.protocol, "name": node.display_name,

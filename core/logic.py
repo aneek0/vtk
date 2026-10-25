@@ -1,12 +1,16 @@
 """Core parsing: vless/vmess/ss/ssr/trojan/hysteria2/socks/happ links + subscriptions."""
 
-import base64
 import contextlib
 import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
+
+from core._b64 import b64decode as _b64decode
+from core.decryptors import decrypt_input
+from core.input import InputKind, classify, default_format
+from core.share import render_link
 
 
 class ParseError(Exception):
@@ -167,100 +171,6 @@ class Node:
 
         return True
 
-    def to_vless_link(self) -> str:
-        if self.protocol != "vless":
-            raise ParseError(f"Cannot convert {self.protocol} to vless link")
-        params = {"encryption": "none", "type": self.net or "raw"}
-        if self.tls:
-            params["security"] = "tls"
-            if self.sni:
-                params["sni"] = self.sni
-            if self.fp:
-                params["fp"] = self.fp
-        if self.reality_pbk:
-            params["security"] = "reality"
-            params["pbk"] = self.reality_pbk
-            if self.reality_sid:
-                params["sid"] = self.reality_sid
-        if self.path:
-            params["path"] = self.path
-        if self.host:
-            params["host"] = self.host
-        if self.flow:
-            params["flow"] = self.flow
-        if self.alpn:
-            params["alpn"] = self.alpn
-        base = f"vless://{self.uuid}@{self.address}:{self.port}"
-        link = base + "?" + urlencode(params)
-        if self.name:
-            link += "#" + quote(self.name, safe="")
-        return link
-
-    def to_trojan_link(self) -> str:
-        if self.protocol != "trojan":
-            raise ParseError(f"Cannot convert {self.protocol} to trojan link")
-        params: dict = {}
-        if self.sni:
-            params["sni"] = self.sni
-        if self.alpn:
-            params["alpn"] = self.alpn
-        if self.net and self.net != "tcp":
-            params["type"] = self.net
-        if self.fp:
-            params["fp"] = self.fp
-        base = f"trojan://{self.trojan_password}@{self.address}:{self.port}"
-        link = base
-        if params:
-            link += "?" + urlencode(params)
-        if self.name:
-            link += "#" + quote(self.name, safe="")
-        return link
-
-    def to_ss_link(self) -> str:
-        if self.protocol != "ss":
-            raise ParseError(f"Cannot convert {self.protocol} to ss link")
-        userinfo = _b64encode(f"{self.ss_method}:{self.ss_password}")
-        link = f"ss://{userinfo}@{self.address}:{self.port}"
-        if self.name:
-            link += "#" + quote(self.name, safe="")
-        return link
-
-    def to_hysteria2_link(self) -> str:
-        if self.protocol != "hysteria2":
-            raise ParseError(f"Cannot convert {self.protocol} to hysteria2 link")
-        params: dict = {}
-        if self.sni:
-            params["sni"] = self.sni
-        if self.obfs:
-            params["obfs"] = self.obfs
-        base = f"hysteria2://{self.hysteria2_password}@{self.address}:{self.port}"
-        link = base
-        if params:
-            link += "?" + urlencode(params)
-        if self.name:
-            link += "#" + quote(self.name, safe="")
-        return link
-
-    def to_link(self) -> str:
-        dispatch = {
-            "vless": self.to_vless_link,
-            "trojan": self.to_trojan_link,
-            "ss": self.to_ss_link,
-            "hysteria2": self.to_hysteria2_link,
-        }
-        fn = dispatch.get(self.protocol)
-        if fn:
-            return fn()
-        if self.protocol == "vmess":
-            return f"vmess://{self.address}:{self.port}"
-        if self.protocol == "ssr":
-            return f"ssr://{self.address}:{self.port}"
-        if self.protocol == "socks":
-            auth = f"{self.socks_username}:{self.socks_password}@" if self.socks_username else ""
-            return f"socks://{auth}{self.address}:{self.port}"
-        return f"{self.protocol}://{self.address}:{self.port}"
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -269,115 +179,91 @@ def _get(qs: dict, key: str, default: str = "") -> str:
     return qs.get(key, [default])[0]
 
 
-def _b64decode(s: str) -> str:
-    s = s.strip()
-    missing = len(s) % 4
-    if missing:
-        s += "=" * (4 - missing)
-    return base64.urlsafe_b64decode(s).decode("utf-8", errors="replace")
+# Query parameters that known spam generators inject into vless/trojan links.
+_SPAM_QUERY_KEYS = {"seq", "scid", "sId"}
+_SPAM_QUERY_TOKENS = (
+    "bia_telegram", "marambashi", "networld_vpn",
+    "vpnserverrr", "you_are_beautiful",
+)
+_REPEATED_VALUE_RE = re.compile(r"(.{5,})\1{3,}")
+_VALID_TRANSPORTS = ("tcp", "raw", "ws", "grpc", "h2", "quic", "xhttp")
 
 
-def _b64encode(s: str) -> str:
-    return base64.urlsafe_b64encode(s.encode()).decode().rstrip("=")
+def _split_link(rest: str) -> tuple[str, str, str]:
+    """Split ``authority[?query][#fragment]``.
+
+    Some providers emit ``authority&param=value`` with no ``?``; a leading
+    ``&`` therefore starts the query just like ``?``.  The fragment is cut
+    first so a ``#`` inside it can never be mistaken for a query boundary.
+    """
+    head, has_fragment, fragment = rest.partition("#")
+    cut = min((i for i in (head.find("?"), head.find("&")) if i != -1), default=-1)
+    if cut == -1:
+        return head, "", fragment if has_fragment else ""
+    return head[:cut], head[cut + 1:], fragment if has_fragment else ""
+
+
+def _clean_query_param(key: str, raw_value: str) -> str | None:
+    """Return the normalized ``key=value`` pair, or ``None`` to drop it."""
+    value = _sanitize_value(unquote(raw_value))
+    if key in _SPAM_QUERY_KEYS:
+        return None
+    if _REPEATED_VALUE_RE.search(value):
+        return None
+    if any(token in value.lower() for token in _SPAM_QUERY_TOKENS):
+        return None
+    if len(value) > 200:
+        return None
+    if key == "packet-encoding":
+        key = "packetEncoding"
+    if key == "type" and value not in _VALID_TRANSPORTS:
+        return "type=raw"
+    return f"{key}={raw_value}"
 
 
 def fix_link(link: str) -> str:
-    """Normalize a proxy link to standard format.
+    """Normalize a vless/trojan link before parsing.
 
-    Fixes:
-    - vless/trojan: adds ? before first & if no ? present
-    - vless: adds type=raw if missing (default transport)
-    - vless: removes invalid transport types (e.g. type=foo -> type=raw)
-    - vless/trojan: removes known spam/malware query parameters
-    - vless: normalizes packet-encoding -> packetEncoding
+    Repairs third-party output that podkop and Happ reject:
+
+    - ``&`` instead of ``?`` before the first query parameter;
+    - missing ``type=raw`` (vless default transport);
+    - invalid transport types (``type=foo`` → ``type=raw``);
+    - known spam/malware query parameters;
+    - ``packet-encoding`` → ``packetEncoding``.
+
+    Works on the authority/query/fragment split rather than on raw string
+    offsets, so a link with a fragment and no query (``...#name``) stays valid.
+    Other schemes pass through unchanged.
     """
     link = link.strip()
     if not link:
         return link
 
     for prefix in ("vless://", "trojan://"):
-        if link.startswith(prefix):
-            rest = link[len(prefix):]
-            # authority ends at first ?, &, or #
-            end = len(rest)
-            for c in ("?", "&", "#"):
-                idx = rest.find(c)
-                if idx != -1 and idx < end:
-                    end = idx
+        if not link.startswith(prefix):
+            continue
+        authority, query, fragment = _split_link(link[len(prefix):])
+        params = []
+        for part in query.split("&"):
+            if "=" not in part:
+                continue
+            key, raw_value = part.split("=", 1)
+            cleaned = _clean_query_param(key, raw_value)
+            if cleaned:
+                params.append(cleaned)
 
-            authority = rest[:end]
-            remainder = rest[end:]
+        if prefix == "vless://" and not any(
+            p.split("=", 1)[0] == "type" for p in params
+        ):
+            params.append("type=raw")
 
-            # & -> ? at start of query
-            if remainder.startswith("&"):
-                remainder = "?" + remainder[1:]
-
-            # Clean query string: remove known spam params and fix values
-            if "?" in remainder:
-                q_start = remainder.find("?")
-                query_str = remainder[q_start + 1:]
-                frag = ""
-                if "#" in query_str:
-                    qi = query_str.find("#")
-                    frag = query_str[qi:]
-                    query_str = query_str[:qi]
-
-                # Parse and filter query params
-                params = []
-                for part in query_str.split("&"):
-                    if "=" not in part:
-                        continue
-                    k, v = part.split("=", 1)
-                    v_decoded = unquote(v)
-                    # Clean junk characters (Latin Extended spam)
-                    v_decoded = _sanitize_value(v_decoded)
-
-                    # Skip known spam params
-                    if k in ("seq", "scid", "sId"):
-                        continue
-
-                    # Skip params with repeated/spam values
-                    if re.search(r"(.{5,})\1{3,}", v_decoded):
-                        continue
-
-                    # Skip params containing known spam tokens
-                    v_lower = v_decoded.lower()
-                    if any(tok in v_lower for tok in (
-                        "bia_telegram", "marambashi", "networld_vpn",
-                        "vpnserverrr", "you_are_beautiful",
-                    )):
-                        continue
-
-                    # Skip params with excessively long values (>200 chars)
-                    if len(v_decoded) > 200:
-                        continue
-
-                    # Fix invalid transport -> raw
-                    if k == "type" and v_decoded not in ("tcp", "raw", "ws", "grpc", "h2", "quic", "xhttp"):
-                        v_decoded = "raw"
-                        v = "raw"
-
-                    params.append(f"{k}={v}")
-
-                remainder = "?" + "&".join(params) if params else ""
-                if frag:
-                    remainder += frag
-
-            # vless: ensure type is present (check decoded full link)
-            if prefix == "vless://" and "type=" not in unquote(remainder):
-                hash_idx = remainder.find("#")
-                if hash_idx != -1:
-                    remainder = remainder[:hash_idx] + "&type=raw" + remainder[hash_idx:]
-                elif remainder.startswith("?"):
-                    remainder = remainder + "&type=raw"
-                else:
-                    remainder = remainder + "?type=raw"
-
-            # Normalize packet-encoding -> packetEncoding
-            remainder = remainder.replace("packet-encoding=", "packetEncoding=")
-
-            return prefix + authority + remainder
-
+        fixed = prefix + authority
+        if params:
+            fixed += "?" + "&".join(params)
+        if fragment:
+            fixed += "#" + fragment
+        return fixed
     return link
 
 # Country detection tables (module-level: built once, not per call).
@@ -641,19 +527,31 @@ def parse_ssr(link: str) -> Node:
         for kv in param_str.split("&"):
             if "=" in kv:
                 k, v = kv.split("=", 1)
-                params[k] = unquote(v)
+                params[k] = _ssr_param(v)
     return Node(
         protocol="ssr",
         address=parts[0],
         port=int(parts[1]),
-        name=unquote(params.get("remarks", "")),
+        name=params.get("remarks", ""),
         ssr_protocol=parts[2],
         ss_method=parts[3],
         ssr_obfs=parts[4],
         ss_password=_b64decode(parts[5]),
-        ssr_protocol_param=unquote(params.get("protoparam", "")),
-        ssr_obfs_param=unquote(params.get("obfsparam", "")),
+        ssr_protocol_param=params.get("protoparam", ""),
+        ssr_obfs_param=params.get("obfsparam", ""),
     )
+
+
+def _ssr_param(value: str) -> str:
+    """Decode an SSR query value: base64url per spec, plain text when lenient."""
+    value = unquote(value)
+    if not value:
+        return ""
+    try:
+        decoded = _b64decode(value)
+    except Exception:
+        return value
+    return decoded if decoded.isprintable() else value
 
 
 def parse_hysteria2(link: str) -> Node:
@@ -686,12 +584,22 @@ def parse_socks(link: str) -> Node:
     parsed = urlparse(link)
     if not parsed.hostname or not parsed.port:
         raise ParseError("Missing host/port")
+    username = unquote(parsed.username or "")
+    password = unquote(parsed.password or "")
+    if username and not password:
+        # v2rayN-style socks links carry base64("user:pass") as the userinfo.
+        try:
+            decoded = _b64decode(username)
+        except Exception:
+            decoded = ""
+        if ":" in decoded:
+            username, password = decoded.split(":", 1)
     node = Node(
         protocol="socks",
         address=parsed.hostname,
         port=parsed.port,
-        socks_username=unquote(parsed.username or ""),
-        socks_password=unquote(parsed.password or ""),
+        socks_username=username,
+        socks_password=password,
     )
     if parsed.fragment:
         node.name = unquote(parsed.fragment)
@@ -714,11 +622,19 @@ _PROTOCOL_PREFIXES = {
 
 
 def parse_link(link: str) -> Node:
-    """Auto-detect protocol and parse a single link."""
+    """Auto-detect protocol and parse a single link.
+
+    Malformed values that ``urllib.parse`` rejects (for example a port it
+    cannot cast to int) surface as :class:`ParseError`, so a single bad line
+    never escapes the batch parsers.
+    """
     link = link.strip()
     for prefix, parser in _PROTOCOL_PREFIXES.items():
         if link.startswith(prefix):
-            return parser(link)
+            try:
+                return parser(link)
+            except ValueError as e:
+                raise ParseError(f"Invalid link: {e}") from e
     raise ParseError(f"Unknown protocol prefix in: {link[:30]}...")
 
 
@@ -983,46 +899,15 @@ def parse_subscription_text(text: str) -> list[Node]:
         # Try direct JSON/YAML config parsing (Xray array, sing-box, mihomo)
         with contextlib.suppress(Exception):
             from core.reverse import from_config
+
             real_nodes = from_config(text)
     return real_nodes
 
 
 # ---------------------------------------------------------------------------
-# Centralized decryption + unified input processing
+# Unified input processing
 # ---------------------------------------------------------------------------
 
-def decrypt_input(raw: str) -> str:
-    """Decrypt all ``happ://`` / ``incy://`` links in a raw input string.
-
-    Pure offline wrapper over the bundled ``core.happ`` / ``core.incy``
-    decryptors. Per-link decode failures are handled inside the decryptors
-    (the original link stays untouched), so only an unexpected bug can raise
-    here. Already-plain text passes through unchanged (idempotent).
-    """
-    from core.errors import DecryptError
-    from core.happ import decrypt_text as happ_decrypt_text
-    from core.incy import decrypt_text as incy_decrypt_text
-
-    text = raw
-    for decryptor in (happ_decrypt_text, incy_decrypt_text):
-        with contextlib.suppress(DecryptError):
-            text = decryptor(text)
-    return text
-
-
-def _detect_input_type(text: str) -> str:
-    """Detect input type: 'sub', 'sub-wrap', 'config', 'link'.
-
-    Note: detection runs on the *decrypted* text, so callers should pass
-    already-decrypted input (``decrypt_input`` does this for the unified
-    ``process_input`` path).
-    """
-    text = text.strip()
-    if text.startswith(("http://", "https://")):
-        return "sub"
-    if text.startswith("{") or "proxies:" in text or text.startswith("- name:"):
-        return "config"
-    return "link"
 
 def protocol_counts(nodes: list[Node]) -> dict[str, int]:
     """Count nodes per protocol, most frequent first."""
@@ -1042,10 +927,7 @@ def _node_to_dict(node: Node) -> dict:
     d = {"protocol": proto, "name": node.display_name, "address": node.address,
          "port": node.port, "net": node.net or "raw"}
     d["type"] = node.net or "raw"
-    try:
-        d["link"] = node.to_link()
-    except Exception:
-        d["link"] = ""
+    d["link"] = render_link(node)
     if node.reality_pbk:
         d["reality"] = True
         d["security"] = "reality"
@@ -1138,7 +1020,6 @@ async def process_input(raw: str, fmt=None, device_headers: dict | None = None,
         "content": ..., "sub_name": ...}`` on success, or
         ``{"ok": False, "error": ...}`` on failure.
     """
-    from core.converters import Format, convert
     from core.settings import load_settings
 
     s = load_settings()
@@ -1150,13 +1031,13 @@ async def process_input(raw: str, fmt=None, device_headers: dict | None = None,
     except Exception as e:
         return {"ok": False, "error": f"Decrypt failed: {e}"}
 
-    input_type = _detect_input_type(raw)
+    kind = classify(raw)
     sub_name = ""
     sub_headers = []
     content = ""
     sub_url = ""
 
-    if input_type == "sub":
+    if kind is InputKind.SUB:
         try:
             sub_url = raw.strip()
             resp = await fetch_subscription(
@@ -1170,7 +1051,7 @@ async def process_input(raw: str, fmt=None, device_headers: dict | None = None,
             nodes = parse_subscription_text(content)
         except Exception as e:
             return {"ok": False, "error": f"Subscription fetch failed: {e}"}
-    elif input_type == "config":
+    elif kind is InputKind.CONFIG:
         try:
             from core.reverse import from_config
             nodes = from_config(raw)
@@ -1179,11 +1060,35 @@ async def process_input(raw: str, fmt=None, device_headers: dict | None = None,
         except Exception as e:
             return {"ok": False, "error": f"Config parse failed: {e}"}
     else:
-        nodes = parse_text_input(raw)
-        nodes = [n for n in nodes if n.protocol != "error"]
+        nodes = [n for n in parse_text_input(raw) if n.protocol != "error"]
 
+    return render_nodes(
+        nodes, fmt, kind=kind, protocol=protocol,
+        group_by_country=group_by_country, tag_prefix=tag_prefix,
+        sub_name=sub_name, sub_headers=sub_headers, content=content,
+        sub_url=sub_url,
+    )
+
+
+def render_nodes(nodes: list[Node], fmt=None, *, kind: InputKind = InputKind.LINK,
+                 protocol: str | None = None,
+                 group_by_country: bool | None = None, tag_prefix: str = "",
+                 sub_name: str = "", sub_headers: list | None = None,
+                 content: str = "", sub_url: str = "") -> dict:
+    """Filter, sort, convert and shape already-parsed nodes for front-ends.
+
+    Split out of :func:`process_input` so a caller that already holds parsed
+    nodes (the bot's protocol picker) re-renders them without refetching the
+    subscription or re-parsing the input. Returns the same dict contract as
+    ``process_input``.
+    """
+    from core.converters import Format, convert
+    from core.settings import load_settings
+
+    s = load_settings()
     protocols = protocol_counts(nodes)
     total_nodes = len(nodes)
+    parsed = list(nodes)  # pre-filter: a picker re-renders from this
     if protocol and protocol != "all":
         nodes = [n for n in nodes if n.protocol == protocol]
         if not nodes:
@@ -1193,41 +1098,29 @@ async def process_input(raw: str, fmt=None, device_headers: dict | None = None,
     if not nodes:
         return {"ok": False, "error": "No valid proxy links found."}
 
-    # Resolve output format
     if fmt is None:
-        if input_type == "sub":
-            fmt = s.sub_format
-        elif input_type == "config":
-            fmt = s.config_format
-        else:
-            # Multiple share-links in one message -> txt format
-            lines = [ln.strip() for ln in raw.strip().splitlines()
-                     if ln.strip() and not ln.startswith("#")]
-            share_prefixes = ("vless://", "vmess://", "trojan://", "ss://", "ssr://")
-            link_lines = [ln for ln in lines
-                          if any(ln.startswith(p) for p in share_prefixes)]
-            fmt = s.txt_format if len(link_lines) > 1 else s.link_format
-
+        fmt = default_format(kind, s, total_nodes)
     if group_by_country is None:
         group_by_country = s.group_by_country
     if group_by_country:
         nodes = sort_nodes_by_country(nodes)
     try:
-        result = convert(nodes, fmt, tag_prefix=tag_prefix, group_by_country=group_by_country)
+        result = convert(nodes, fmt, tag_prefix=tag_prefix,
+                         group_by_country=group_by_country)
     except ParseError as e:
         return {"ok": False, "error": str(e)}
 
-    servers = [_node_to_dict(n) for n in nodes]
     return {
         "ok": True,
-        "input_type": input_type,
+        "input_type": kind.value,
         "format": fmt.value if isinstance(fmt, Format) else str(fmt),
         "nodes": len(nodes),
         "total_nodes": total_nodes,
         "protocols": protocols,
         "result": result,
-        "servers": servers,
-        "sub_headers": sub_headers,
+        "parsed": parsed,
+        "servers": [_node_to_dict(n) for n in nodes],
+        "sub_headers": sub_headers or [],
         "content": content,
         "sub_name": sub_name,
         "sub_url": sub_url,

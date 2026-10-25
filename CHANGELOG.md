@@ -4,6 +4,43 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-10-25
+
+### Fixed
+- `fix_link` no longer corrupts a link that has a fragment but no query
+  (`vless://uuid@host:443#name` became `…:443&type=raw#name`, so the port parsed
+  as `443&type=raw` and the whole request failed). Query handling now works on
+  an explicit authority/query/fragment split.
+- A malformed link can no longer abort a batch: `urllib.parse` `ValueError`s
+  (e.g. out-of-range ports) are converted to `ParseError` in `parse_link`.
+- Default format for a batch of links is decided by the parsed node count, not
+  by matching a hardcoded prefix list — batches of `hysteria2`/`socks`/`ssr`
+  links now honour `txt_format` like `vless` batches do.
+- `txt` output and the web server list now emit a working share link for every
+  protocol: `vmess` (base64 JSON), `ssr` (full payload) and `socks`
+  (base64 userinfo) were rendered as `vmess://host:port`, `ssr://host:port`
+  and `socks://<user>:<pass>@host` — or dropped entirely.
+- Bot protocol picker re-renders the batch it already parsed instead of
+  refetching the subscription; the callback now names no hash of the input, and
+  state is keyed by the message carrying the keyboard.
+- `vtk --version` reports the installed package version (was hardcoded to
+  `0.1.0` since the first release).
+
+### Changed
+- Share-link rendering has one owner, `core/share.py` (`render_link`);
+  `Node.to_*_link`/`to_link` and the adapters' `to_link` copies are gone.
+- Input classification (`core/input.py`: `classify`, `settings_key`,
+  `default_format`) and the format registry (`core/formats.py`:
+  `FormatSpec`/`SECTIONS`) replace the copies that lived in the bot, CLI, web
+  routes and the HTML template.
+- `core/decryptors.py` owns the `happ`/`incy` decryptors behind one
+  `Decryptor` interface; `/api/<scheme>/*` routes are generated from it and
+  `/p/` decrypts both schemes (previously only `happ`).
+- Base64 helpers moved to `core/_b64.py`.
+- Web `/api/convert` GET and POST share one request builder, so both validate
+  the format and reject empty input identically.
+
+
 ## [1.2.0] - 2026-10-24
 
 ### Added

@@ -3,7 +3,7 @@
 # ⚡ VLESS Toolkit (vtk)
 
 [![CI](https://github.com/aneek0/vtk/actions/workflows/ci.yml/badge.svg)](https://github.com/aneek0/vtk/actions/workflows/ci.yml)
-![version](https://img.shields.io/badge/version-1.2.0-blue)
+![version](https://img.shields.io/badge/version-1.2.1-blue)
 ![license](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)
 ![python](https://img.shields.io/badge/python-3.10%20%7C%203.13-informational)
 
@@ -71,8 +71,8 @@ vtk check vless://...                            # validate link
 **CLI** usage via `uv run` (in repo):
 ```bash
 uv run vtk check vless://...                            # validate link
-uv run vtk parse-cmd vless://...                        # parse & display fields
-uv run vtk convert-cmd -l vless://... -f singbox        # convert single link
+uv run vtk parse vless://...                            # parse & display fields
+uv run vtk convert vless://... -f singbox               # convert single link
 uv run vtk sub https://example.com/sub -f flclash       # fetch subscription
 uv run vtk batch links.txt -f mihomo                    # batch convert file
 uv run vtk extract config.json                          # config → share links
@@ -142,8 +142,10 @@ cli/             — CLI (argparse)
 <summary>fix_link()</summary>
 
 Normalizes proxy links for cross-client compatibility (e.g. podkop):
-- Converts `&` → `?` at query start
-- Adds `type=raw` if missing (vless)
+- Converts `&` → `?` at query start (parses authority/query/fragment
+  explicitly, so a fragment never lands inside the port)
+- Adds `type=raw` if missing (vless), maps invalid transports to `raw`
+- Drops known spam parameters
 - Normalizes `packet-encoding=` → `packetEncoding=`
 
 </details>
@@ -152,9 +154,11 @@ Normalizes proxy links for cross-client compatibility (e.g. podkop):
 <summary>Node validation & round-trip</summary>
 
 ```python
+from core.share import render_link
+
 node = parse_link(link)
 node.validate()               # raises ParseError on critical issues
-link2 = parse_vless(link).to_vless_link()   # round-trip
+link2 = render_link(node)     # round-trip; inverse of the parsers
 ```
 
 `validate()` runs automatically in `parse_text_input()` and `iter_parse_text()`.
@@ -179,8 +183,9 @@ For large inputs, use `iter_parse_text()` (generator) instead of `parse_text_inp
 <summary>Protocol adapters (converters)</summary>
 
 `converters.py` uses a ProtocolAdapter pattern (ABC) for format-specific generation:
-- `VLESSAdapter`, `VMessAdapter`, `TrojanAdapter`, `SSAdapter`, `Hysteria2Adapter`, `SSRAAdapter`
-- Each adapter implements `to_clash_dict()`, `to_mihomo_dict()`, `to_singbox_dict()`, `to_xray_dict()`, `to_link()`
+- `VLESSAdapter`, `VMessAdapter`, `TrojanAdapter`, `SSAdapter`, `Hysteria2Adapter`
+- Each adapter implements `to_clash_dict()`, `to_mihomo_dict()`, `to_singbox_dict()`, `to_xray_dict()`
+- Share links are rendered by `core/share.render_link()`, not by adapters
 - YAML output via PyYAML (no manual indentation)
 
 </details>
@@ -188,7 +193,8 @@ For large inputs, use `iter_parse_text()` (generator) instead of `parse_text_inp
 ## Settings
 
 Stored in `~/.config/vtk/settings.json`. Each input type has its own default
-output format: `sub_format`, `link_format`, `config_format`, `xray_format`, `txt_format`.
+output format: `sub_format`, `link_format`, `config_format`, `txt_format` (plus
+`web_default_format` for the web form's initial selection).
 
 ```json
 {

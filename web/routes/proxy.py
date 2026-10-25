@@ -8,19 +8,21 @@ import httpx
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
-from core.converters import Format, convert
+from core.converters import Format
+from core.decryptors import decrypt_input
 from core.fingerprint import (
     generate_device_fingerprint,
     parse_device_params,
     random_device,
 )
-from core.happ import decrypt_text
-from core.logic import ParseError, parse_subscription_text
+from core.logic import process_input
 from core.net import ResolveError, UnsafeURLError, fetch
 from core.settings import load_settings
 
 router = APIRouter()
 
+# Subscribers ask for formats by client-flavoured names.
+_FORMAT_ALIASES = {"json": "singbox", "clash": "mihomo"}
 
 # ---------------------------------------------------------------------------
 # Per-client rate limit: at most 1 request per second (per IP), in-memory.
@@ -142,8 +144,7 @@ async def api_proxy(
         )
     except httpx.HTTPError as e:
         return JSONResponse({"error": f"Failed to fetch {target_url}: {e}"}, status_code=502)
-
-    content = decrypt_text(content)
+    content = decrypt_input(content)
 
     stripped = content.strip()
     _plain_prefixes = (
@@ -161,25 +162,27 @@ async def api_proxy(
     if output_format == "as_is":
         return PlainTextResponse(content)
 
-    format_map = {
-        "json": Format.SINGBOX, "txt": Format.TXT, "base64": Format.TXT,
-        "mihomo": Format.MIHOMO, "clash": Format.MIHOMO,
-        "singbox": Format.SINGBOX, "flclash": Format.FLCLASH, "xray": Format.XRAY,
-    }
-    fmt = format_map.get(output_format, Format.TXT)
+    # Subscriber-facing aliases: "json" is sing-box, "clash" is mihomo.
+    fmt_name = _FORMAT_ALIASES.get(output_format, output_format)
+    if output_format == "base64":
+        fmt_name = Format.TXT.value
     try:
-        nodes = parse_subscription_text(content)
-        nodes = [n for n in nodes if n.protocol != "error"]
-        if nodes:
-            result = convert(nodes, fmt)
-            if output_format == "base64":
-                result = base64.b64encode(result.encode()).decode()
-            return PlainTextResponse(result)
-        elif output_format == "base64":
+        fmt = Format(fmt_name)
+    except ValueError:
+        fmt = Format.TXT  # unknown format → share links, like before
+    res = await process_input(content, fmt=fmt)
+    if not res.get("ok"):
+        # A subscriber asking for base64 still gets its raw body when nothing
+        # parses (clients re-wrap it themselves).
+        if output_format == "base64" and stripped:
             return PlainTextResponse(base64.b64encode(content.encode()).decode())
-        else:
-            return JSONResponse({"error": "No valid proxy links found in subscription"}, status_code=400)
-    except ParseError as e:
-        return JSONResponse({"error": f"Parse error: {e}"}, status_code=400)
+        return JSONResponse(
+            {"error": res.get("error", "No valid proxy links found in subscription")},
+            status_code=400,
+        )
+    result = res["result"]
+    if output_format == "base64":
+        result = base64.b64encode(result.encode()).decode()
+    return PlainTextResponse(result)
 
 

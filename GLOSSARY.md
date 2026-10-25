@@ -16,13 +16,21 @@ An HTTP(S) URL whose response is a list of share links, usually base64-wrapped.
 Fetched through `core.net.fetch`; its metadata (title, traffic counters, expiry)
 comes from the response headers, not the body.
 
-## Input type
-`link` | `sub` | `config`, decided by `_detect_input_type` **after** decryption.
-It selects the default output format from settings.
+## Input kind
+`link` | `sub` | `config`, decided by `core.input.classify` **after**
+decryption. `InputKind` selects the settings field
+(`core.input.settings_key`) whose format is the default output; a link batch
+(more than one parsed node) uses `txt_format` instead of `link_format`
+(`core.input.default_format`).
 
 ## Format
 A target config dialect: `singbox` (JSON), `mihomo` / `flclash` (YAML), `xray`,
-`txt` (share links). Not the same as the input type.
+`txt` (share links). Not the same as the input kind.
+
+## Format registry
+`core/formats.py` — one `FormatSpec` per format (label, file extension, which
+input kinds may default to it) and one `Section` per settings field. Every
+menu, `<select>`, download filename and "valid: …" error message reads it.
 
 ## Passthrough
 `/p/<device-params>/<subscription-url>` — a proxy URL that carries a device
@@ -36,17 +44,39 @@ The header set (`User-Agent`, `X-Hwid`, `X-Device-Os`, `X-Ver-Os`,
 
 ## Decryptor
 Offline decoder for `happ://crypt*` (RSA/AES-GCM) and `incy://crypt1`
-(AES-256-GCM) wrappers. Failures raise `DecryptError`; a failed link is left
-as-is so the rest of the batch still converts.
+(AES-256-GCM) wrappers, registered in `core/decryptors.py` behind one
+`Decryptor` interface (`is_`, `decrypt_link`, `decrypt_text`, `supported`).
+`decrypt_input` applies all of them and swallows per-link `DecryptError`s, so a
+failed link is left as-is and the rest of the batch still converts. The web
+`/api/<scheme>/*` routes are generated from the registry.
+
+## Share-link codec
+`core/share.py` — `render_link(node)` turns a Node back into a share link and is
+the only renderer; `to_txt`, the web server list and file exports all use it.
+Each renderer must stay inverse to its parser.
 
 ## fix_link
 Normalization pass that makes third-party clients (podkop, Happ) accept a link:
-`&`→`?`, default `type=raw`, `packet-encoding`→`packetEncoding`.
+`&`→`?`, default `type=raw`, invalid transports → `raw`, spam parameters
+dropped, `packet-encoding`→`packetEncoding`. Runs on an explicit
+authority/query/fragment split, so a fragment never lands inside the port.
 
 ## process_input
 The single entry point (`core.logic.process_input`) that runs
-decrypt → detect → fetch/parse → convert. Bots, web routes and the CLI call it
+decrypt → classify → fetch/parse → convert. Bots, web routes and the CLI call it
 instead of assembling their own pipeline.
+
+## render_nodes
+`core.logic.render_nodes` — filter by protocol, sort, convert and shape an
+already-parsed node list into the front-end result dict. `process_input` ends
+here; callers that already hold nodes (the bot's protocol picker) call it
+directly instead of refetching. Its result carries `parsed`, the unfiltered
+nodes, for exactly that re-render.
+
+## PendingConversion
+`bot.state.PendingConversion` — a parsed batch waiting for the user to pick a
+protocol. Stored in `PendingStore`, keyed by `(chat_id, message_id)` of the
+message carrying the keyboard, with a TTL.
 
 ## Trust boundary
 Where untrusted data enters: user input strings, subscription URLs, upstream

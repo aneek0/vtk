@@ -1,109 +1,62 @@
+"""Decryptor API — one route set per registered scheme (happ, incy, …).
+
+Generated from :data:`core.decryptors.DECRYPTORS` so a new scheme needs no
+copy of these four handlers. Paths and response shapes are unchanged:
+``/api/<scheme>/{decrypt,decrypt-text,check,supported}``.
+"""
+
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+
+from core.decryptors import DECRYPTORS, Decryptor
 
 router = APIRouter()
 
 
-# ── Happ API endpoints ──
+def _register(decryptor: Decryptor) -> None:
+    scheme = decryptor.scheme
+    check_key = decryptor.check_key
 
-@router.post("/api/happ/decrypt")
-async def api_happ_decrypt(body: dict):
-    from core.happ import decrypt_link
-    url = body.get("url", "")
-    if not url:
-        return JSONResponse({"ok": False, "error": "Missing 'url' field"}, status_code=400)
-    try:
-        result = decrypt_link(url)
-        return {"ok": True, "decryptedUrl": result}
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    async def decrypt(body: dict):
+        url = body.get("url", "")
+        if not url:
+            return JSONResponse({"ok": False, "error": "Missing 'url' field"}, status_code=400)
+        try:
+            return {"ok": True, "decryptedUrl": decryptor.decrypt_link(url)}
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
+    async def decrypt_text(body: dict):
+        text = body.get("text", "")
+        if not text:
+            return JSONResponse({"ok": False, "error": "Missing 'text' field"}, status_code=400)
+        try:
+            result = decryptor.decrypt_text(text)
+            return {"ok": True, "text": result, "decrypted": result != text}
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
-@router.post("/api/happ/decrypt-text")
-async def api_happ_decrypt_text(body: dict):
-    from core.happ import decrypt_text
-    text = body.get("text", "")
-    if not text:
-        return JSONResponse({"ok": False, "error": "Missing 'text' field"}, status_code=400)
-    try:
-        result = decrypt_text(text)
-        return {"ok": True, "text": result, "decrypted": result != text}
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    async def check(url: str = ""):
+        try:
+            if decryptor.is_(url):
+                return {"ok": True, check_key: True,
+                        "decrypted": decryptor.decrypt_link(url)}
+            return {"ok": True, check_key: False, "original": url}
+        except Exception as e:
+            return {"ok": True, check_key: True, "error": str(e)}
 
+    async def supported():
+        return {"ok": True, **decryptor.supported()}
 
-@router.get("/api/happ/check")
-async def api_happ_check(url: str = ""):
-    from core.happ import decrypt_link, is_happ
-    try:
-        if is_happ(url):
-            decrypted = decrypt_link(url)
-            return {"ok": True, "is_happ": True, "decrypted": decrypted}
-        return {"ok": True, "is_happ": False, "original": url}
-    except Exception as e:
-        return {"ok": True, "is_happ": True, "error": str(e)}
-
-
-@router.get("/api/happ/supported")
-async def api_happ_supported():
-    from core.happdecrypt import _PKCS1_KEYS_B64, _load_crypt5_keys
-    keys = _load_crypt5_keys()
-    return {
-        "ok": True,
-        "versions": ["crypt", "crypt2", "crypt3", "crypt4", "crypt5"],
-        "crypt1_4_keys": len(_PKCS1_KEYS_B64),
-        "crypt5_keys": len(keys),
-    }
+    router.add_api_route(f"/api/{scheme}/decrypt", decrypt, methods=["POST"],
+                         name=f"api_{scheme}_decrypt")
+    router.add_api_route(f"/api/{scheme}/decrypt-text", decrypt_text,
+                         methods=["POST"], name=f"api_{scheme}_decrypt_text")
+    router.add_api_route(f"/api/{scheme}/check", check, methods=["GET"],
+                         name=f"api_{scheme}_check")
+    router.add_api_route(f"/api/{scheme}/supported", supported, methods=["GET"],
+                         name=f"api_{scheme}_supported")
 
 
-# ── Incy API endpoints (incy://crypt1 deep links) ──
-
-@router.post("/api/incy/decrypt")
-async def api_incy_decrypt(body: dict):
-    from core.incy import decrypt_link
-    url = body.get("url", "")
-    if not url:
-        return JSONResponse({"ok": False, "error": "Missing 'url' field"}, status_code=400)
-    try:
-        result = decrypt_link(url)
-        return {"ok": True, "decryptedUrl": result}
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
-
-
-@router.post("/api/incy/decrypt-text")
-async def api_incy_decrypt_text(body: dict):
-    from core.incy import decrypt_text
-    text = body.get("text", "")
-    if not text:
-        return JSONResponse({"ok": False, "error": "Missing 'text' field"}, status_code=400)
-    try:
-        result = decrypt_text(text)
-        return {"ok": True, "text": result, "decrypted": result != text}
-    except Exception as e:
-        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
-
-
-@router.get("/api/incy/check")
-async def api_incy_check(url: str = ""):
-    from core.incy import decrypt_link, is_incy
-    try:
-        if is_incy(url):
-            decrypted = decrypt_link(url)
-            return {"ok": True, "is_incy": True, "decrypted": decrypted}
-        return {"ok": True, "is_incy": False, "original": url}
-    except Exception as e:
-        return {"ok": True, "is_incy": True, "error": str(e)}
-
-
-@router.get("/api/incy/supported")
-async def api_incy_supported():
-    from core.incy import KEY_FINGERPRINT, SCHEME_VERSION, VERSION
-    return {
-        "ok": True,
-        "scheme": SCHEME_VERSION,
-        "versions": ["crypt1"],
-        "keyFingerprint": KEY_FINGERPRINT,
-        "version": VERSION,
-    }
-
+for _decryptor in DECRYPTORS:
+    _register(_decryptor)

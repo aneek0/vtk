@@ -12,6 +12,7 @@ from core.logic import (
     fix_link,
     iter_parse_text,
     parse_hysteria2,
+    parse_link,
     parse_socks,
     parse_ss,
     parse_text_input,
@@ -20,6 +21,7 @@ from core.logic import (
     parse_vmess,
     sort_nodes_by_country,
 )
+from core.share import render_link
 
 # ---------------------------------------------------------------------------
 # fix_link
@@ -73,6 +75,15 @@ class TestFixLink:
 
     def test_empty_link(self):
         assert fix_link("") == ""
+
+    def test_vless_fragment_without_query(self):
+        fixed = fix_link("vless://uuid@host:443#Name")
+        assert fixed == "vless://uuid@host:443?type=raw#Name"
+
+    def test_vless_fragment_without_query_parses(self):
+        node = parse_vless(fix_link("vless://uuid@host:443#Name"))
+        assert node.port == 443
+        assert node.name == "Name"
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +267,11 @@ class TestParseTextInput:
         assert nodes[1].protocol == "error"
         assert nodes[2].protocol == "vless"
 
+    def test_out_of_range_port_does_not_kill_batch(self):
+        text = f"{VLESS_LINK}\nvless://uuid@host:99999#Bad\n{VLESS_LINK}"
+        nodes = parse_text_input(text)
+        assert [n.protocol for n in nodes] == ["vless", "error", "vless"]
+
     def test_iter_parse_text(self):
         text = f"{VLESS_LINK}\n{VLESS_LINK}"
         nodes = list(iter_parse_text(text))
@@ -424,16 +440,66 @@ class TestConverters:
         with pytest.raises(ParseError):
             convert([], Format.SINGBOX)
 
-# ---------------------------------------------------------------------------
-# Node.to_vless_link round-trip
-# ---------------------------------------------------------------------------
+# render_link round-trip
 
 class TestRoundTrip:
     def test_vless_round_trip(self):
         node = parse_vless(VLESS_LINK)
-        link = node.to_vless_link()
+        link = render_link(node)
         node2 = parse_vless(link)
         assert node.uuid == node2.uuid
         assert node.address == node2.address
         assert node.port == node2.port
         assert node.name == node2.name
+
+    def test_vmess_round_trip(self):
+        node = Node(protocol="vmess", uuid="11111111-2222-3333-4444-555555555555",
+                    address="vm.example.com", port=443, name="VM 🇩🇪",
+                    net="ws", tls=True, sni="vm.example.com", path="/ws",
+                    vmess_aid=0, vmess_scy="auto")
+        node2 = parse_link(render_link(node))
+        assert (node2.protocol, node2.address, node2.port, node2.name) == (
+            "vmess", "vm.example.com", 443, "VM 🇩🇪")
+        assert node2.uuid == node.uuid
+        assert node2.net == "ws"
+        assert node2.tls is True
+        assert node2.path == "/ws"
+
+    def test_ssr_round_trip(self):
+        node = Node(protocol="ssr", address="ssr.example.com", port=8388,
+                    name="SSR node", ss_method="aes-256-cfb",
+                    ss_password="secret", ssr_protocol="origin",
+                    ssr_obfs="plain", ssr_protocol_param="",
+                    ssr_obfs_param="")
+        node2 = parse_link(render_link(node))
+        assert (node2.address, node2.port, node2.name) == (
+            "ssr.example.com", 8388, "SSR node")
+        assert node2.ss_method == "aes-256-cfb"
+        assert node2.ss_password == "secret"
+
+    def test_socks_with_auth_round_trip(self):
+        node = Node(protocol="socks", address="s.example.com", port=1080,
+                    name="Socks", socks_username="user",
+                    socks_password="p@ss:word")
+        node2 = parse_link(render_link(node))
+        assert (node2.socks_username, node2.socks_password) == (
+            "user", "p@ss:word")
+
+    def test_txt_includes_every_supported_protocol(self):
+        nodes = [
+            Node(protocol="vmess", uuid="u", address="a", port=443),
+            Node(protocol="ssr", address="b", port=8388, ss_method="rc4-md5",
+                 ss_password="x"),
+            Node(protocol="socks", address="c", port=1080),
+            Node(protocol="error", name="bad"),
+        ]
+        txt = convert(nodes, Format.TXT)
+        assert [line.split("://")[0] for line in txt.splitlines()] == [
+            "vmess", "ssr", "socks"]
+
+    def test_txt_links_reparse(self):
+        nodes = [parse_vless(VLESS_LINK), parse_trojan("trojan://p@t.example:443#T"),
+                 parse_ss("ss://YWVzLTI1Ni1nY206cGFzcw@ss.example:8388#S")]
+        reparsed = [parse_link(line) for line in convert(nodes, Format.TXT).splitlines()]
+        assert [n.protocol for n in reparsed] == ["vless", "trojan", "ss"]
+        assert [n.name for n in reparsed] == [n.name for n in nodes]

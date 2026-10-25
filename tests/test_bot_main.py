@@ -9,6 +9,7 @@ cases, and failure modes of the link handler.
 
 import asyncio
 from collections import defaultdict
+from types import SimpleNamespace
 
 import pytest
 
@@ -44,16 +45,32 @@ class FakeMessage:
 
 
 class FakeStatus:
+    """Stand-in for a sent/edited message; usable as a callback's ``message``."""
+
+    _next_id = 1000
+
     def __init__(self, text):
         self.text = text
         self.edited = None
         self.reply_markup = None
+        self.replies = []
+        self.chat = SimpleNamespace(id=42)
+        FakeStatus._next_id += 1
+        self.message_id = FakeStatus._next_id
 
     async def edit_text(self, text, **kwargs):
         self.edited = text
         self.text = text
         self.reply_markup = kwargs.get("reply_markup")
         return self
+
+    async def reply(self, text=None, **kwargs):
+        msg = FakeStatus(text)
+        self.replies.append(msg)
+        return msg
+
+    async def reply_document(self, document, **kwargs):
+        self.replies.append(FakeStatus("doc"))
 
 
 def _make_process_input_result(ok=True, **over):
@@ -592,5 +609,87 @@ def test_real_dispatcher_routes_text_to_handler(monkeypatch):
     bot = Bot(token="123:fake")
     asyncio.run(dp.feed_update(bot, update))
     assert seen.get("text") == "vless://a@b:443#n"
+
+
+# ---------------------------------------------------------------------------
+# Protocol picker state
+# ---------------------------------------------------------------------------
+
+def test_pending_store_pops_once_and_expires():
+    from bot.state import PendingConversion, PendingStore
+    from core.converters import Format
+
+    store = PendingStore(ttl=60)
+    pending = PendingConversion(nodes=[], protocols={}, fmt=Format.TXT)
+    store.store((1, 2), pending)
+    assert store.take((1, 2)) is pending
+    assert store.take((1, 2)) is None  # popped, not reread
+
+    store.store((1, 3), pending)
+    pending.created -= 120  # past the TTL
+    assert store.take((1, 3)) is None
+
+
+def test_pending_store_evicts_oldest_at_capacity():
+    from bot.state import PendingConversion, PendingStore
+    from core.converters import Format
+
+    store = PendingStore(ttl=60, max_entries=2)
+    first = PendingConversion(nodes=[], protocols={}, fmt=Format.TXT)
+    second = PendingConversion(nodes=[], protocols={}, fmt=Format.TXT,
+                               created=first.created + 1)
+    third = PendingConversion(nodes=[], protocols={}, fmt=Format.TXT,
+                              created=first.created + 2)
+    store.store((1, 1), first)
+    store.store((1, 2), second)
+    store.store((1, 3), third)
+    assert store.take((1, 1)) is None
+    assert store.take((1, 3)) is third
+
+
+def test_protocol_pick_rerenders_stored_nodes(monkeypatch, fake_msg):
+    """Picking a protocol re-renders the parsed batch — it must not refetch."""
+    from core.logic import parse_link
+
+    nodes = [
+        parse_link("vless://11111111-2222-3333-4444-555555555555@a.example:443#V"),
+        parse_link("trojan://pw@t.example:443#T"),
+    ]
+
+    async def fake_process(raw, **kwargs):
+        return _make_process_input_result(
+            nodes=2, total_nodes=2, protocols={"vless": 1, "trojan": 1},
+            parsed=nodes, servers=[], format="txt", sub_name="Sub",
+        )
+
+    monkeypatch.setattr(botmod, "process_input", fake_process)
+    monkeypatch.setattr(botmod, "load_settings", lambda: Settings())
+    monkeypatch.setattr("core.settings.load_settings", lambda: Settings())
+    botmod.PENDING._items.clear()
+
+    asyncio.run(botmod._process_input(fake_msg, "two links of two protocols"))
+    prompt = fake_msg.replies[-1]
+    assert prompt.reply_markup is not None
+    assert len(botmod.PENDING) == 1
+
+    async def no_refetch(*args, **kwargs):
+        raise AssertionError("protocol pick must not re-run process_input")
+
+    monkeypatch.setattr(botmod, "process_input", no_refetch)
+    cb = FakeCallback("proto:trojan")
+    cb.message = prompt
+    asyncio.run(botmod.cb_protocol(cb))
+
+    rendered = "\n".join(r.text or "" for r in prompt.replies)
+    assert "trojan://" in rendered
+    assert "vless://" not in rendered
+    assert len(botmod.PENDING) == 0
+
+
+def test_protocol_pick_after_state_loss_asks_to_resend(fake_msg):
+    botmod.PENDING._items.clear()
+    cb = FakeCallback("proto:vless")
+    asyncio.run(botmod.cb_protocol(cb))
+    assert "Expired" in (cb.answered or "")
 
 

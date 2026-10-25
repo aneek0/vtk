@@ -4,6 +4,9 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from core.formats import FORMATS
+from core.settings import load_settings
+
 router = APIRouter()
 
 _templates_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates")
@@ -11,7 +14,11 @@ templates = Jinja2Templates(directory=_templates_dir)
 
 
 def _page(request: Request, tab: str = "convert") -> HTMLResponse:
-    return templates.TemplateResponse(request, "index.html", {"tab": tab})
+    return templates.TemplateResponse(request, "index.html", {
+        "tab": tab,
+        "formats": FORMATS,
+        "default_format": load_settings().web_default_format.value,
+    })
 
 
 @router.get("/", response_class=HTMLResponse)

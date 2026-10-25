@@ -11,8 +11,12 @@ Usage:
 import argparse
 import asyncio
 import sys
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _pkg_version
 
 from core.converters import Format, convert, to_txt
+from core.formats import SECTIONS, extension, formats_for, names
+from core.input import InputKind, classify, settings_key
 from core.logic import (
     ParseError,
     parse_link,
@@ -23,20 +27,12 @@ from core.logic import (
 from core.reverse import from_config as from_config_reverse
 from core.settings import load_settings, save_settings
 
-FORMATS = ["singbox", "mihomo", "flclash", "txt", "xray"]
+try:
+    __version__ = _pkg_version("vtk")
+except PackageNotFoundError:  # running from a plain source checkout
+    __version__ = "0+unknown"
 
-
-# ---------------------------------------------------------------------------
-# Core logic (same as before, no typer dependency)
-# ---------------------------------------------------------------------------
-
-def _detect_input(text: str) -> str:
-    text = text.strip()
-    if text.startswith(("http://", "https://")):
-        return "sub"
-    if text.startswith("{") or "proxies:" in text or text.startswith("- name:"):
-        return "config"
-    return "link"
+FORMATS = names()
 
 
 def do_convert(input_str: str, fmt_str: str = "", output: str = "", protocol: str = ""):
@@ -142,21 +138,20 @@ def cmd_interactive(args):
         chosen_proto = chosen_proto if chosen_proto not in ("", "all") else ""
 
 
-    input_type = _detect_input(text)
-    type_labels = {"sub": "subscription", "config": "config", "link": "link(s)"}
-    print(f"\n📎 Detected: {type_labels.get(input_type, input_type)}")
-
-    fmt_map = {
-        "sub": ("sub_format", [Format.SINGBOX, Format.MIHOMO, Format.FLCLASH, Format.TXT]),
-        "link": ("link_format", [Format.SINGBOX, Format.MIHOMO, Format.FLCLASH, Format.TXT]),
-        "config": ("config_format", [Format.TXT, Format.SINGBOX, Format.MIHOMO]),
+    kind = classify(text)
+    type_labels = {
+        InputKind.SUB: "subscription",
+        InputKind.CONFIG: "config",
+        InputKind.LINK: "link(s)",
     }
-    setting_key, formats = fmt_map.get(input_type, fmt_map["link"])
-    current = getattr(s, setting_key)
+    print(f"\n📎 Detected: {type_labels[kind]}")
+
+    options = formats_for(kind)
+    current = getattr(s, settings_key(kind))
 
     print(f"\nCurrent default: {current.value}")
     print("Select output format:")
-    for i, f in enumerate(formats, 1):
+    for i, f in enumerate(options, 1):
         mark = "✅" if f == current else "  "
         print(f"  {mark} {i}. {f.value}")
 
@@ -170,7 +165,7 @@ def cmd_interactive(args):
 
     try:
         idx = int(choice) - 1
-        chosen_fmt = formats[idx]
+        chosen_fmt = options[idx]
     except (ValueError, IndexError):
         chosen_fmt = current
     res = asyncio.run(process_input(text, fmt=chosen_fmt, protocol=chosen_proto or None))
@@ -181,10 +176,6 @@ def cmd_interactive(args):
     print(f"\n✅ {res['nodes']} nodes:\n")
     print(result)
 
-
-
-def _fmt_ext(fmt: Format) -> str:
-    return {"singbox": "json", "mihomo": "yaml", "flclash": "yaml", "txt": "txt", "xray": "json"}.get(fmt.value, "txt")
 
 
 def _safe_filename(name: str, ext: str) -> str:
@@ -214,11 +205,7 @@ def cmd_sub(args):
         print(f"❌ {e}", file=sys.stderr)
         sys.exit(1)
 
-    if args.output:
-        out_path = args.output
-    else:
-        ext = _fmt_ext(fmt)
-        out_path = _safe_filename(sub_name, ext)
+    out_path = args.output or _safe_filename(sub_name, extension(fmt))
 
     with open(out_path, "w") as f:
         f.write(result)
@@ -274,10 +261,8 @@ def cmd_extract(args):
 
 def cmd_settings_show(args):
     s = load_settings()
-    print(f"Sub format    : {s.sub_format.value}")
-    print(f"Link format   : {s.link_format.value}")
-    print(f"Config format : {s.config_format.value}")
-    print(f"TXT format    : {s.txt_format.value}")
+    for position, section in enumerate(SECTIONS, 1):
+        print(f"{position}. {section.label:<15}: {getattr(s, section.key).value}")
     print(f"Sort/group by country: {s.group_by_country}")
     print(f"Tag prefix    : {s.tag_prefix or '(none)'}")
     print(f"Timeout       : {s.timeout}s")
@@ -288,35 +273,30 @@ def cmd_settings_show(args):
 def cmd_settings_interactive(args):
     s = load_settings()
     print("⚙️ Settings — Select output format per input type\n")
-    print(f"  1. 📋 Subs → {s.sub_format.value}")
-    print(f"  2. 🔗 Links → {s.link_format.value}")
-    print(f"  3. ⚙️ Configs → {s.config_format.value}")
-    print(f"  4. 📝 TXT → {s.txt_format.value}")
-    print(f"  5. 🔄 Sort/group by country: {'✅' if s.group_by_country else '❌'}")
-    print(f"  6. 🔗 Sub passthrough: {'✅' if s.sub_passthrough else '❌'}")
+    for position, section in enumerate(SECTIONS, 1):
+        print(f"  {position}. {section.label} → {getattr(s, section.key).value}")
+    print(f"  {len(SECTIONS) + 1}. 🔄 Sort/group by country: "
+          f"{'✅' if s.group_by_country else '❌'}")
+    print(f"  {len(SECTIONS) + 2}. 🔗 Sub passthrough: "
+          f"{'✅' if s.sub_passthrough else '❌'}")
     print()
 
     try:
-        choice = input("Choose section [1-6]: ").strip()
+        choice = input(f"Choose section [1-{len(SECTIONS) + 2}]: ").strip()
     except EOFError:
         return
 
-    format_options = [Format.SINGBOX, Format.MIHOMO, Format.FLCLASH, Format.TXT, Format.XRAY]
+    format_options = [fmt_spec.fmt for fmt_spec in FORMATS]
 
-    if choice == "1":
-        setting_key, label = "sub_format", "Subscription"
-    elif choice == "2":
-        setting_key, label = "link_format", "Links"
-    elif choice == "3":
-        setting_key, label = "config_format", "Configs"
-    elif choice == "4":
-        setting_key, label = "txt_format", "TXT"
-    elif choice == "5":
+    if choice.isdigit() and 1 <= int(choice) <= len(SECTIONS):
+        section = SECTIONS[int(choice) - 1]
+        setting_key, label = section.key, section.label
+    elif choice == str(len(SECTIONS) + 1):
         s.group_by_country = not s.group_by_country
         save_settings(s)
         print(f"✅ group_by_country = {s.group_by_country}")
         return
-    elif choice == "6":
+    elif choice == str(len(SECTIONS) + 2):
         s.sub_passthrough = not s.sub_passthrough
         save_settings(s)
         print(f"✅ sub_passthrough = {s.sub_passthrough}")
@@ -324,7 +304,6 @@ def cmd_settings_interactive(args):
     else:
         print("Invalid choice", file=sys.stderr)
         return
-
     current = getattr(s, setting_key)
     print(f"\n{label} format (current: {current.value}):")
     for i, f in enumerate(format_options, 1):
@@ -371,7 +350,7 @@ def main():
         prog="vtk",
         description="VLESS Toolkit — parse, validate, convert proxy links & subscriptions",
     )
-    parser.add_argument("--version", action="version", version="vtk 0.1.0")
+    parser.add_argument("--version", action="version", version=f"vtk {__version__}")
 
     sub = parser.add_subparsers(dest="command")
 

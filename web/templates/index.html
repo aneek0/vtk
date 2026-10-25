@@ -74,11 +74,9 @@
         <div class="field">
           <label for="convertFormat">Format</label>
           <select id="convertFormat">
-            <option value="singbox">sing-box JSON</option>
-            <option value="mihomo">mihomo YAML</option>
-            <option value="flclash">FlClash YAML</option>
-            <option value="xray">XRAY JSON</option>
-            <option value="txt">Plain text</option>
+            {% for fmt in formats %}
+            <option value="{{ fmt.fmt.value }}"{% if fmt.fmt.value == default_format %} selected{% endif %}>{{ fmt.label }}</option>
+            {% endfor %}
           </select>
         </div>
         <div class="field">
@@ -178,11 +176,9 @@
         <label for="proxyFormat">Output format</label>
         <select id="proxyFormat">
           <option value="as_is">as-is (raw)</option>
-          <option value="singbox">sing-box JSON</option>
-          <option value="mihomo">mihomo YAML</option>
-          <option value="flclash">flClash YAML</option>
-          <option value="xray">xray JSON</option>
-          <option value="txt">txt (share links)</option>
+          {% for fmt in formats %}
+          <option value="{{ fmt.fmt.value }}">{{ fmt.label }}</option>
+          {% endfor %}
           <option value="base64">base64</option>
         </select>
       </div>

@@ -106,3 +106,32 @@ def test_process_input_no_nodes_errors():
     res = asyncio.run(process_input("this is not a proxy link at all"))
     assert res["ok"] is False
     assert "error" in res
+
+
+def test_batch_default_format_counts_every_protocol():
+    """A multi-link batch resolves to txt_format whatever its schemes are.
+
+    Regression: the default-format heuristic matched a hardcoded prefix list,
+    so a batch of two hysteria2 links (absent from that list) fell through to
+    link_format while two vless links correctly got txt_format.
+    """
+    from core.settings import load_settings
+
+    settings = load_settings()
+    hy2 = [
+        "hysteria2://pass@example.com:443?sni=a.example#One",
+        "hysteria2://pass@example.com:8443?sni=b.example#Two",
+    ]
+    res = asyncio.run(process_input("\n".join(hy2)))
+    assert res["ok"] is True
+    assert res["nodes"] == 2
+    assert res["format"] == settings.txt_format.value
+
+
+def test_single_link_uses_link_format():
+    from core.settings import load_settings
+
+    res = asyncio.run(
+        process_input("hysteria2://pass@example.com:443?sni=a.example#One")
+    )
+    assert res["format"] == load_settings().link_format.value

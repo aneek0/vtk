@@ -38,8 +38,8 @@ uv sync --all-extras
 
 ```bash
 uv run vtk check vless://...                        # валидация
-uv run vtk parse-cmd vless://...                     # парсинг с выводом полей
-uv run vtk convert-cmd -l vless://... -f singbox     # конвертация
+uv run vtk parse vless://...                       # парсинг с выводом полей
+uv run vtk convert vless://... -f singbox           # конвертация
 uv run vtk sub https://sub.url -f flclash            # подписка
 uv run vtk batch links.txt -f mihomo                 # пакетно
 uv run vtk extract config.json                       # извлечь ссылки
@@ -79,8 +79,13 @@ HTML-форма + JSON API:
 
 ```
 core/
-  logic.py       — парсинг ссылок, fix_link(), fetch subscriptions (headers=), extract_country()
-  converters.py  — singbox / mihomo / flclash / txt output
+  logic.py       — парсинг ссылок, fix_link(), process_input/render_nodes, fetch subscriptions
+  share.py       — render_link(): единственный рендерер Node → share-ссылка
+  input.py       — InputKind/classify/settings_key/default_format (какой формат по умолчанию)
+  formats.py     — реестр форматов: FormatSpec (label/extension/default_for) + SECTIONS
+  converters.py  — singbox / mihomo / flclash / xray / txt output
+  decryptors.py  — реестр дешифраторов happ/incy (Decryptor, DECRYPTORS, decrypt_input)
+  _b64.py        — общие base64url-хелперы
   net.py         — единая политика fetch: TLS verify, лимит редиректов, SSRF-гвард
   errors.py      — DecryptError (общий для happ/incy)
   fingerprint.py — device fingerprint: parse/generate params, app-link parse, random, get_proxy_base
@@ -88,7 +93,7 @@ core/
   settings.py    — настройки пользователя (атомарная запись, включая proxy device)
   happ.py        — happ://crypt* офлайн-дешифратор (все RSA-ключи вшиты)
   incy.py        — incy://crypt* офлайн-дешифратор (AES-256-GCM, keymat вшит)
-bot/       — Telegram bot (aiogram 3): /settings, /proxy, меню device, импорт app-link
+bot/       — Telegram bot (aiogram 3): /settings, /proxy, меню device, импорт app-link; state.py — PendingStore
 web/       — FastAPI: /convert, /proxy (/p/<params>/<url>), /api/device/random, HTML
 cli/       — CLI (argparse, не typer)
 ```
@@ -97,16 +102,28 @@ cli/       — CLI (argparse, не typer)
 
 ### fix_link()
 Нормализует прокси-ссылки для совместимости (например, podkop):
-- `&` → `?` в начале query
-- Добавляет `type=raw` если нет (vless)
+- `&` → `?` в начале query (authority/query/fragment разбираются явно,
+  фрагмент без query не ломает порт)
+- Добавляет `type=raw` если нет (vless), невалидный `type` → `raw`
+- Убирает известные спам-параметры
 - `packet-encoding=` → `packetEncoding=`
 
+`parse_link` превращает `ValueError` от `urllib.parse` (например, порт вне
+диапазона) в `ParseError`, поэтому битая строка не валит батч.
+
 ### Сериализация (round-trip)
-Каждый протокол имеет метод `to_*_link()`:
+Единственный рендерер — `core.share.render_link(node)` (обратен парсерам):
 ```python
+from core.share import render_link
 node = parse_vless(link)
-link2 = node.to_vless_link()  # round-trip
+link2 = render_link(node)  # round-trip
 ```
+
+### Дефолтный формат
+`core.input.classify(text)` → `InputKind`; `default_format(kind, settings,
+node_count)` выбирает поле настроек (`settings_key()`), причём батч из
+нескольких ссылок — это `node_count > 1`, независимо от протоколов.
+`core.formats` хранит подписи/расширения/меню форматов.
 
 ### Стриминговый парсер
 Для больших входов использовать `iter_parse_text()` (генератор) вместо `parse_text_input()`.
@@ -155,14 +172,21 @@ device-настройки, включая `proxy_headers_on`.
 
 ## Инварианты
 
-- Один путь обработки: `core.logic.process_input` (decrypt → detect → fetch/parse →
-  convert). Бот, веб и CLI не вызывают `decrypt_text` сами.
+- Один путь обработки: `core.logic.process_input` (decrypt → classify →
+  fetch/parse → convert → `render_nodes`). Бот, веб и CLI не вызывают
+  `decrypt_text` сами и не фильтруют ноды по протоколу вручную.
+- Рендер share-ссылок — только `core/share.render_link`; `to_txt`, список
+  серверов в вебе и выгрузки файлов используют его (у каждого протокола
+  рендерер обратен своему парсеру).
+- Классификация входа — только `core/input.py`; подписи форматов, расширения
+  файлов и меню/`<select>` — только `core/formats.py`.
 - Все сетевые запросы идут через `core.net.fetch`: TLS-проверка включена
   (отключается только `insecure_tls` в настройках), редиректы ≤ 3, на каждом
   хопе — SSRF-гвард (приватные/loopback адреса отклоняются, обход —
   `VTK_ALLOW_PRIVATE_URLS=1`).
-- Расшифровка: `happ://`/`incy://` бросают `core.errors.DecryptError`;
-  per-link ошибки не валят батч, другие исключения — валят (это баги).
+- Расшифровка: `core/decryptors.py` (`DECRYPTORS`, единый `decrypt_input`);
+  `happ://`/`incy://` бросают `core.errors.DecryptError`, per-link ошибки не
+  валят батч, другие исключения — валят (это баги).
 - Настройки пишутся атомарно (`tmp` + `os.replace`, режим 0600) и читаются
   поключево: битое значение отбрасывается, остальные сохраняются.
 - Device fingerprint — только `core/fingerprint.py`.
